@@ -1,0 +1,25 @@
+{
+  "name": "Gateway_node_webserver",
+  "version": "1.2.0",
+  "main": "./src/App.js",
+  "dependencies": {
+    "chokidar": "~1.0.3",
+    "finalhandler": "^0.5.0",
+    "fs-extra": "~0.22.1",
+    "ip": "~1.1.0",
+    "mqtt": "~1.7.0",
+    "mqtt-emitter": "^1.2.4",
+    "semver": "^5.2.0",
+    "serve-static": "^1.11.1",
+    "socket.io": "~1.3.6",
+    "timequeue": "^0.2.2",
+    "underscore": "~1.8.3",
+    "winston": "^2.2.0"
+  },
+  "scripts": {
+    "cloud": "node ./src/cloud/App.js",
+    "local": "node ./src/local/App.js"
+  },
+  "author": "Silicon Labs",
+  "engine": "node >= 0.4.0"
+}

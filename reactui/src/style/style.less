@@ -1,0 +1,179 @@
+@import 'semantic-ui/semantic';
+@import (inline) "node_modules/semantic-ui-transition/transition.css";
+
+
+@primary-blue: #51d6ff;
+@darker-blue: #29a4ff;
+@dark-gray: #313131;
+@darker-gray: #222222;
+@gray-blue: #e8ebef;
+@light-gray-blue: #f8fbff;
+@blackish: #ffffff;
+@silabsmedgrey: #555555;
+@silabslightgrey: #B2B2B2;
+@silabssuperlightgrey: #EFEFEF;
+
+html, body {
+	background-color: @silabssuperlightgrey;
+}
+
+.application {
+	background-color: @silabssuperlightgrey;
+}
+
+.control-panel {
+	.header {
+		margin: 0px;
+
+		img.logo {
+			vertical-align: top;
+			width: 100px;
+			padding: 10px;
+		}
+		.title {
+			display: inline-block;
+			margin-left: 10px;
+			margin-top: 0;
+			padding-top: 31px;
+			vertical-align: top;
+		}
+	}
+}
+
+.device-list {
+	.item {
+		position: relative;
+		.remove-item {
+			position: absolute;
+			right: 0;
+			top: 10px;
+		}
+	}
+}
+
+.rules-list {
+	.item {
+		position: relative;
+		.remove-item {
+			position: absolute;
+			right: 0;
+		}
+	}
+}
+
+.toggle-checkbox {
+	position: absolute;
+	right: 0;
+	top: 10px;
+	-webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  user-select: none !important;
+  cursor: default !important;
+}
+
+.toggle-all-checkbox {
+	position: absolute;
+	right: 14px;
+	top: 15px;
+	-webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  user-select: none !important;
+  cursor: default !important;
+}
+
+.silabsiconbuttons {
+	padding: 5px !important;
+	margin-top: 2px !important;
+	margin-right: 7px !important;
+	background-color: @silabsmedgrey !important;
+	box-shadow: 0px 0px 0px 1px @silabslightgrey inset !important;
+	color: @silabssuperlightgrey !important;
+}
+
+.silabsiconred {
+	padding: 5px !important;
+	margin-top: 2px !important;
+	margin-right: 7px !important;
+	box-shadow: 0px 0px 0px 1px @silabslightgrey inset !important;
+}
+
+.silabsglobal {
+	background-color: @silabsmedgrey !important;
+	box-shadow: 0px 0px 0px 1px @silabslightgrey inset !important;
+	color: #silabssuperlightgrey !important;
+}
+
+.adding-rule {
+    opacity: 1;
+	-webkit-transition: opacity 0.5s;
+	transition: opacity 0.5s;
+}
+
+.ui-input {
+	font-size: 10pt !important;
+}
+
+.hidden-rule {
+	opacity: 0;
+}
+
+.appearing-button {
+	opacity: 1;
+	-webkit-transition: opacity 0.5s;
+	transition: opacity 0.5s;
+}
+
+.hidden {
+	display: none !important;
+}
+
+.innerdiv {
+    width: 50%;
+    margin: 0 auto;
+}
+
+.customheader {
+	display: inline-block;
+}
+
+.logoutput {
+	white-space: pre-wrap;
+}
+
+.rulescreation-enter {
+  opacity: 0.01;
+  transition: opacity .2s ease-in;
+}
+
+.rulescreation-enter.rulescreation-enter-active {
+  opacity: 1;
+}
+
+.rulescreation-leave {
+  opacity: 1;
+  transition: opacity .2s ease-in;
+}
+
+.rulescreation-leave.rulescreation-leave-active {
+  opacity: 0.01;
+}
+
+.showadd-enter {
+  opacity: 0.01;
+  transition: opacity .05s ease-in;
+}
+
+.showadd-enter.showadd-enter-active {
+  opacity: 1;
+}
+
+.showadd-leave {
+  opacity: 1;
+  transition: opacity .001s ease-in;
+}
+
+.showadd-leave.showadd-leave-active {
+  opacity: 0.01;
+}
