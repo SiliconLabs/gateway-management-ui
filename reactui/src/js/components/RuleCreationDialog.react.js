@@ -19,12 +19,12 @@ class RuleCreationDialog extends React.Component {
     this.props.onUnmount();
   }
 
-  _onSwitchSelect(switchId) {
-    this.setState({switch: switchId});
+  _onInputNodeSelect(inputNodeId) {
+    this.setState({inputNode: inputNodeId});
   }
 
-  _onLightSelect(lightId) {
-    this.setState({light: lightId});
+  _onOutputNodeSelect(outputNodeId) {
+    this.setState({outputNode: outputNodeId});
   }
 
   clickedCancel() {
@@ -32,9 +32,9 @@ class RuleCreationDialog extends React.Component {
   }
 
   _onCreate() {
-    if (this.state && !_.isUndefined(this.state.switch) && !_.isUndefined(this.state.light)) {
+    if (this.state && !_.isUndefined(this.state.inputNode) && !_.isUndefined(this.state.outputNode)) {
       if (this.props.onRuleCreate) {
-        this.props.onRuleCreate({switch: this.state.switch, light: this.state.light});
+        this.props.onRuleCreate({inputNode: this.state.inputNode, outputNode: this.state.outputNode});
       }
     }
   }
@@ -43,11 +43,11 @@ class RuleCreationDialog extends React.Component {
     return (
       <div>
         <h5>Input Node</h5>
-        <Dropdown onSelect={this._onSwitchSelect.bind(this)}
-          options={this.props.switches} />
+        <Dropdown onSelect={this._onInputNodeSelect.bind(this)}
+          options={this.props.inputNodesList} />
         <h5>Output Node</h5>
-        <Dropdown onSelect={this._onLightSelect.bind(this)}
-          options={this.props.lights} />
+        <Dropdown onSelect={this._onOutputNodeSelect.bind(this)}
+          options={this.props.outputNodesList} />
         <div className="ui divider"></div>
         <div className="ui button basic silabsglobal"
           onTouchTap={this._onCreate.bind(this)}>
@@ -63,8 +63,8 @@ class RuleCreationDialog extends React.Component {
 }
 
 RuleCreationDialog.propTypes = {
-  switches: React.PropTypes.array.isRequired,
-  lights: React.PropTypes.array.isRequired,
+  inputNodesList: React.PropTypes.array.isRequired,
+  outputNodesList: React.PropTypes.array.isRequired,
   onRuleCreate: React.PropTypes.func,
   onCancel: React.PropTypes.func,
   onUnmount: React.PropTypes.func

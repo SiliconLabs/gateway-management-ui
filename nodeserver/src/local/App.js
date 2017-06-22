@@ -20,11 +20,12 @@ var fs               = require('fs-extra')
 Logger.server.log('info', 'Silicon Labs HA MQTT/Websocket server starting... ');
 
 /* Stub for Gateway Process */
-var gatewayProcess; 
-var ncpSubProcess; 
+var gatewayProcess;
+var ncpSubProcess;
+var isCliTerminalEnabled = false;
 
-/* Initial Setup */ 
-var TimeQueueOptions = {concurrency: 1, every: Constants.SETUP_ZIGBEE_MS_THROTTLE}; 
+/* Initial Setup */
+var TimeQueueOptions = {concurrency: 1, every: Constants.SETUP_ZIGBEE_MS_THROTTLE};
 
 // Pass servers into Server Actions
 ServerActions.GatewayInterface.mqttClient = GatewayInterface;
@@ -61,7 +62,7 @@ function findGatewayUpdateAndStart() {
 
       /* Check if ncp is connected */
       if (latestConnectedZigBeeNCP) {
-        Logger.server.log('info', 'Found NCP', latestConnectedZigBeeNCP); 
+        Logger.server.log('info', 'Found NCP', latestConnectedZigBeeNCP);
         startGateway(latestConnectedZigBeeNCP);
       }
     }.bind(this));
@@ -71,23 +72,39 @@ function findGatewayUpdateAndStart() {
 /* 5 second watchdog for restarting gateway process */
 setInterval(function() {
   if(!gatewayProcess && !ncpSubProcess) {
-    Logger.server.log('info', 'Searching for NCP...'); 
-    findGatewayUpdateAndStart(); 
+    Logger.server.log('info', 'Searching for NCP...');
+    findGatewayUpdateAndStart();
+  } else if (gatewayProcess) {
+    if (isCliTerminalEnabled != DeviceController.serverSettings.cliTerminal) {
+      isCliTerminalEnabled = DeviceController.serverSettings.cliTerminal;
+      gatewayProcess.kill();
+      findGatewayUpdateAndStart();
+    }
   }
-}.bind(this), Constants.GATEWAY_PROCESS_WATCHDOG_TIMER); 
+}.bind(this), Constants.GATEWAY_PROCESS_WATCHDOG_TIMER);
 
 /* Static Functions */
 function startGateway(ZigBeeNCP) {
   if(!gatewayProcess) {
-    var baudSpecifier; 
+    var baudSpecifier;
     if (ZigBeeNCP.port == '/dev/ttyACM0') {
       baudSpecifier = '0';
     } else {
       baudSpecifier = '1';
     }
-    gatewayProcess = child_process.spawn(binPath + '/siliconlabsgateway', ['-n', baudSpecifier, '-p', ZigBeeNCP.port], {
-      cwd: binPath
-    });
+
+    if (!DeviceController.serverSettings.cliTerminal) {
+      gatewayProcess = child_process.spawn(binPath + '/siliconlabsgateway', ['-n', baudSpecifier, '-p', ZigBeeNCP.port], {
+        cwd: binPath
+      });
+      isCliTerminalEnabled = false;
+    } else {
+      gatewayProcess = child_process.spawn(Constants.TERMINAL_COMMAND, ['-e', binPath + '/siliconlabsgateway -n '+ baudSpecifier + ' -p ' + ZigBeeNCP.port], {
+        cwd: binPath
+      });
+      isCliTerminalEnabled = true;
+    }
+    
     Logger.server.log('info', 'Started Gateway Host Process');
 
     gatewayProcess.stdout.on('data', function(data) {
@@ -102,8 +119,8 @@ function startGateway(ZigBeeNCP) {
     }.bind(this));
 
     gatewayProcess.on('close', function(code) {
-      gatewayProcess = null; 
-      connecting = false; 
+      gatewayProcess = null;
+      connecting = false;
       Logger.server.log('info', 'ZigBee Gateway Host Process Closed');
     }.bind(this));
 
@@ -117,7 +134,7 @@ function killGateway() {
   gatewayProcess.kill('SIGHUP');
 }
 
-/* This function returns all ZigBee NCPs */ 
+/* This function returns all ZigBee NCPs */
 function getAllConnectedZigBeeNCP(callback) {
   ncpSubProcess = child_process.exec('python /opt/siliconlabs/zigbeegateway/tools/ncp-updater/ncp.py scan', {timeout: 4000}, function(error, stdout, stderr) {
     ncpSubProcess = null;
@@ -128,7 +145,7 @@ function getAllConnectedZigBeeNCP(callback) {
 
     if (stdout) Logger.server.log('info', 'ncp.py scan: ' + stdout);
 
-    if (stderr) Logger.server.log('error', 'ncp.py scan: ' + stderr); 
+    if (stderr) Logger.server.log('error', 'ncp.py scan: ' + stderr);
 
     try {
       var physicalDevices = JSON.parse(stdout);
@@ -137,7 +154,7 @@ function getAllConnectedZigBeeNCP(callback) {
       });
       callback(zigbeeDevices);
     } catch(e) {
-      Logger.server.log('error', 'ncp.py scan exception: ' + e.toString()); 
+      Logger.server.log('error', 'ncp.py scan exception: ' + e.toString());
       callback(false);
     }
   }.bind(this));
@@ -156,7 +173,7 @@ function getAllConnectedZigBeeNCP(callback) {
 
 /* This function updates a ZigBee NCP */
 function updateConnectedZigBeeNCP(ZigBeeNCP, imageToUpdateTo, callback) {
-  var flashCommand = 'python /opt/siliconlabs/zigbeegateway/tools/ncp-updater/ncp.py flash -p ' + ZigBeeNCP.port + ' -f ' + imageToUpdateTo; 
+  var flashCommand = 'python /opt/siliconlabs/zigbeegateway/tools/ncp-updater/ncp.py flash -p ' + ZigBeeNCP.port + ' -f ' + imageToUpdateTo;
   Logger.server.log('info', 'p.py flash: starting update: ' + ZigBeeNCP.port + ' ' + imageToUpdateTo);
   ncpSubProcess = child_process.exec(flashCommand, function(error, stdout, stderr) {
     ncpSubProcess = null;
@@ -165,7 +182,7 @@ function updateConnectedZigBeeNCP(ZigBeeNCP, imageToUpdateTo, callback) {
       callback(true);
     }
 
-    if (stderr) { 
+    if (stderr) {
       Logger.server.log('error', 'ncp.py flash: ' + stderr);
       callback(true);
     }
@@ -184,12 +201,13 @@ function getLatestVersionZigBeeNCP(zigbeeDevices) {
     return latestZigBeeDevice;
   } else {
     Logger.server.log('error', 'There are no ZigBee NCP images connected');
-    return null; 
+    DeviceController.onGatewaySettings('');
+    return null;
   }
 }
 
 function compareZigBeeNCPStackVersion(zigbee1, zigbee2) {
-  return semver.compare(zigbee2.stackVersion, zigbee1.stackVersion); 
+  return semver.compare(zigbee2.stackVersion, zigbee1.stackVersion);
 }
 
 function cleanup() {

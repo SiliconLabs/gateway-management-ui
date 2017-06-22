@@ -1,3 +1,4 @@
+var Constants = require('../Constants');
 var Config = require('../Config');
 var Flux = require('../Flux');
 var React = require('react');
@@ -40,7 +41,11 @@ class Slider extends React.Component {
         this.setState({percentValue: (e.target.value * 100) / 254});
       } else {
         this.setState({rawValue: e.target.value});
-        this.setState({colorTemp: (e.target.value * ((-2349) / 173) + 7728)});
+        if (e.target.value != 0) {
+          this.setState({colorTemp: Constants.MAX_COLOR_TEMP_KELVINS / e.target.value});
+        } else {
+          this.setState({colorTemp: e.target.value})
+        }
       }
       this.tChangeLevel(e.target.value);
     }

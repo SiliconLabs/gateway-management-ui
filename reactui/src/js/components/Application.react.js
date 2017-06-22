@@ -43,6 +43,7 @@ class Application extends React.Component {
   selectTab(tab) {
     Flux.actions.getGatewayState();
     Flux.actions.getWebserverState();
+    Flux.actions.gatewayPermitJoiningOff();
     cookie.save('selectedMenu', tab);
     this.setState({
       selectedMenu: tab

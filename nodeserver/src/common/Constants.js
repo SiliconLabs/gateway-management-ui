@@ -15,7 +15,15 @@ var Constants = {
   DEVICE_TYPE_CONTACT_SENSOR: 0x0402,
   DEVICE_TYPE_SMART_PLUG: 0x0051,
   DEVICE_TYPE_OCCUPANCY_SENSOR: 0x0107,
-  
+
+  IN_OUT_DECISION_CLUSTER: 0x0400,
+  // ZigBee On/off Cluster
+  ON_OFF_CLUSTER: 0x0006,
+  // ZigBee Color-Control Cluster
+  COLOR_CONTROL_CLUSTER: 0x0300,
+  // ZigBee Level-Control CLuster
+  LEVEL_CONTROL_CLUSTER: 0x0008,
+
   // ZigBee Bootloader Cluster
   BOOTLOADER_CLUSTER: 0x0019,
   FIRMWARE_VERSION_ATTRIBUTE: 0x0002,
@@ -65,7 +73,7 @@ var Constants = {
   // Occupancy Sensing Cluster
   OCCUPANCY_CLUSTER: 0x0406,
   OCCUPANCY_VAL_ATTRIBUTE: 0x0000,
-  OCCUPANCY_VAL_TYPE: 0x0018, 
+  OCCUPANCY_VAL_TYPE: 0x0018,
   OCCUPANCY_SENSOR_TYPE_ATTRIBUTE: 0x0001,
   OCCUPANCY_SENSOR_TYPE_TYPE: 0x0030,
 
@@ -86,10 +94,14 @@ var Constants = {
   ACTIVE_POWER_OVERLOAD_ATTRIBUTE: 0x0803,
   ACTIVE_POWER_OVERLOAD_TYPE: 0x29,
 
+  // Endpoints
+  SELF_ENDPOINT: 0,
+  SMART_ENERGY_ENDPOINT: 220,
+
   // Commands
   ZONE_STATUS_CHANGE_NOTIFICATION_COMMAND_ID: 0x00,
 
-  // Gateway Transport Defined Node States 
+  // Gateway Transport Defined Node States
   ND_JUST_JOINED:   0x00,
   ND_HAVE_ACTIVE:   0x01,
   ND_HAVE_EP_DESC:  0x02,
@@ -103,12 +115,13 @@ var Constants = {
   SHUTDOWN_TIMER: 1000,
   GATEWAY_HEARTBEAT_FREQUENCY_MS: 5000,
   TEST_MESSAGE_IN_FLIGHT_TIMEOUT: 3000,
-  SETUP_ZIGBEE_MS_THROTTLE: 1000,
+  SETUP_ZIGBEE_MS_THROTTLE: 200,
   BIND_POST_DELAY: 200,
   REPORTING_POST_DELAY: 200,
   GATEWAY_PROCESS_WATCHDOG_TIMER: 5000,
+  OTA_BLOCKSENT_TIMEOUT: 30000,
 
-  ZIGBEE_NCP_REQUIRED_VERSION: '5.7.0',
+  ZIGBEE_NCP_REQUIRED_VERSION: '5.9.0',
 
   MQTT_PRIVKEY_FILELOCATION: '/certs/client.key',
   MQTT_CERT_FILELOCATION: '/certs/client.crt',
@@ -116,19 +129,28 @@ var Constants = {
 
   SOCKETS_PRIVKEY_FILELOCATION: '/key.pem',
   SOCKETS_CERT_FILELOCATION: '/fullchain.pem',
+  TERMINAL_COMMAND: 'mate-terminal',
+  POSTDELAY_KEYWORD: 'postDelayMs',
+  POSTDELAYMS_DEFAULT: 100,
+  LINKKEY_START_INDEX: 110,
+  CENTRALIZED_SECURITY: 1,
 
   // File Paths
   logPath: '../../../../logs/',
   gatewayTransportLogFilename: 'server.log',
   gatewayLogFilename: 'gateway.log',
   testLogFilename: 'traffictest.log',
-  gatewayStore: 'store.txt',
-  rulesStore: 'cloudrules.txt',
+  gatewayStore: 'stores/GatewayStores.txt',
+  rulesStore: 'controller/stores/CloudRules.txt',
+  zb3KeysStore: 'controller/stores/ZB3Keys.txt',
+  keyDerivationExec: 'hashing-cli',
 
   // This path reflects the ZigBee VM's filestructure
   znetOtaDirectory: '../../bin/ota-files',
   otaArchivePath: '../../../../ota_staging',
-  staticPath: '../../../../reactui/dist'
+  commandsScriptsPath: '../../../../../tools',
+  staticPath: '../../../../reactui/dist',
+  keyDerivationPath: '../../../../tools/key-derivation/'
 };
 
 module.exports = Constants;

@@ -1,4 +1,4 @@
-/** 
+/**
  * @jsx React.DOM
  */
 
@@ -9,7 +9,7 @@ var Version = require('../Version');
 class About extends React.Component {
   constructor(props) {
     super(props);
-    
+
     this.state = {
       ip: Flux.stores.store.ip,
       displayName: 'About',
@@ -24,7 +24,7 @@ class About extends React.Component {
       });
       this.forceUpdate();
     }.bind(this));
-    
+
     Flux.stores.store.on('change', function() {
         this.setState({
           ip: Flux.stores.store.ip,
@@ -42,15 +42,15 @@ class About extends React.Component {
     return (
       <div className="ui segment control-panel" style={{margin: '0rem', borderRadius: '0rem'}}>
         <div className="header">
-            <img className="logo" 
+            <img className="logo"
               src="/assets/silicon-labs-logo.png" />
             <h3 className="title">About, Version, Contact Information</h3>
         </div>
-        
+
         <div className="ui divider"></div>
-        
+
         <h4><u>About</u></h4>
-        
+
         <p>
           ZigBee Gateway Version: {this.state.version} {this.state.time}<br/>
           ZigBee Gateway IP: {this.state.ip} <br/>
@@ -65,13 +65,13 @@ class About extends React.Component {
         </p>
 
         <p>
-          <i>Copyright &copy; 2016 Silicon Laboratories, Inc. All rights reserved.</i>
+          <i>Copyright &copy; 2017 Silicon Laboratories, Inc. All rights reserved.</i>
         </p>
 
         <div className="ui divider"></div>
 
         <div className="footer">
-          <h5 className="ui right aligned header">{this.state.version}</h5>
+          <h5 className="ui right aligned header">ZigBee Gateway Version: {this.state.version}</h5>
         </div>
       </div>
     );

@@ -1,49 +1,28 @@
 var Constants = require('../Constants');
 var Fluxxor = require('fluxxor');
-
-var lights = {};
-lights[Constants.DEVICE_ID_ON_OFF_LIGHT] = 'Light';
-lights[Constants.DEVICE_ID_DIMMABLE_LIGHT] = 'Dimmable Light';
-lights[Constants.DEVICE_ID_HA_ON_OFF_LIGHT] = 'Ha On/Off Light Switch';
-lights[Constants.DEVICE_ID_COLOR_DIMMABLE_LIGHT] = 'Dimmable Color Light';
-lights[Constants.DEVICE_ID_EXTENDED_COLOR_LIGHT] = 'Extended Color Light';
-lights[Constants.DEVICE_ID_COLOR_TEMPERATURE_LIGHT] = 'Color Temperature Light';
-
-var switches = {};
-switches[Constants.DEVICE_ID_ON_OFF_SWITCH] = 'Switch';
-switches[Constants.DEVICE_ID_LEVEL_CONTROL_SWITCH] = 'Dimmer';
-switches[Constants.DEVICE_ID_COLOR_DIMMER_SWITCH] = 'Dimmer';
-
-var sensors = {};
-sensors[Constants.DEVICE_TYPE_SENSOR] = 'Multi Sensor';
-sensors[Constants.DEVICE_TYPE_CONTACT_SENSOR] = 'Contact Sensor';
-sensors[Constants.DEVICE_TYPE_OCCUPANCY_SENSOR] = 'Occupancy Sensor';
-
-var smartplugs = {};
-smartplugs[Constants.DEVICE_TYPE_SMART_PLUG] = 'Smart Plug';
-
-var nodestate = {};
-nodestate[Constants.ND_JUST_JOINED] = 'Joining';
-nodestate[Constants.ND_HAVE_ACTIVE] = 'Joining';
-nodestate[Constants.ND_HAVE_EP_DESC] = 'Joining';
-nodestate[Constants.ND_JOINED] = 'Joined';
-nodestate[Constants.ND_UNRESPONSIVE] = 'Unresponsive';
-nodestate[Constants.ND_LEAVE_SENT] = 'Leave Sent';
-nodestate[Constants.ND_LEFT] = 'Left';
-nodestate[Constants.ND_UNKNOWN] = 'Unknown';
+var lights = require('./DeviceConstants').lights;
+var switches = require('./DeviceConstants').switches;
+var sensors = require('./DeviceConstants').sensors;
+var smartplugs = require('./DeviceConstants').smartplugs;
+var nodestate = require('./DeviceConstants').nodestate;
+var nodeListBindableClusters = require('./DeviceConstants').nodeListBindableClusters;
+var supportedBindingInCloudRules = require('./DeviceConstants').supportedBindingInCloudRules;
 
 var Store = Fluxxor.createStore({
   initialize: function() {
     this.devices = [];
     this.groups = [];
+    this.inputNodesList = [];
+    this.outputNodesList = [];
     this.deviceContact = {};
     this.deviceTemp = {};
     this.gatewayEui = '';
     this.serverLog = '';
     this.gatewayLog = '';
     this.testLog = '';
-    this.tests = []; 
+    this.tests = [];
     this.rules = [];
+    this.cloudRules = [];
     this.otafiles = {};
     this.ip = '';
     this.serversettings = '';
@@ -52,9 +31,13 @@ var Store = Fluxxor.createStore({
     this.testing = false;
     this.groupsnum = 0;
     this.buildinfo = '';
+    this.networkSecurityLevel = 'Z3';
+    this.installCodeFromServer = '';
 
     /* Uncomment this line to add mock devices for UI validaiton */
-    //this.testDevices();
+    //this.testJoinColorControlLight();
+    //this.testJoinDimmer();
+    //this.testJoinOccupancy();
 
     this.urlParameters = {};
     window.location.search
@@ -77,67 +60,126 @@ var Store = Fluxxor.createStore({
       Constants.TRAFFIC_TEST_LOG, this.loadTrafficTestLog,
       Constants.TRAFFIC_TEST_RESULTS, this.onTrafficTestResults,
       Constants.HEARTBEAT, this.onHeartbeat,
+      Constants.NETWORK_SECURITY_LEVEL, this.onNetworkSecurityLevel,
       Constants.SERVER_LOG_STREAM, this.updateServerLogStream,
-      Constants.GATEWAY_LOG_STREAM, this.updateGatewayLogStream
+      Constants.GATEWAY_LOG_STREAM, this.updateGatewayLogStream,
+      Constants.INSTALL_COLLECTION, this.updateInstallCodeFromServer
     );
   },
 
-  getBuildInfo: function(callback) {
-    if (this.buildinfo === '') {
-      $.getJSON('/assets/version.json', function(data) {
-        this.buildinfo = data;
-        callback(this.buildinfo);
-      }.bind(this));
-    } else {
-      callback(this.buildinfo);
-    }
+  onDeviceJoined: function(newNode) {
+    _.remove(this.devices, function(device) {
+      return ((device.deviceEndpoint.eui64 === newNode.deviceEndpoint.eui64) &&
+              (device.deviceEndpoint.endpoint === newNode.deviceEndpoint.endpoint))
+    });
+
+    this.devices.push(newNode);
+    this.removeNodeInfoInLists(newNode);
+    this.pushNodeInfoToNodeLists(newNode);
+    this.emit('change');
   },
 
   onDeviceListUpdated: function(messageParsed) {
-    this.gatewayEui = messageParsed.gatewayEui;
-
-    this.devices = _.map(messageParsed.devices, function(device) {
-      device.gatewayEui = messageParsed.gatewayEui;
-
-      if (!device.hasOwnProperty('otaUpdating')) {
-        device.otaUpdating = false; 
-      }
-
-      if (!device.hasOwnProperty('otaTotalBytesSent')) {
-        device.otaTotalBytesSent = 0; 
-      }
-
-      if (!device.hasOwnProperty('otaUpdatePercent')) {
-        device.otaUpdatePercent = 0; 
-      }
-
-      if (!device.hasOwnProperty('otaTargetImageSizeKB')) {
-        device.otaTargetImageSizeKB = 0; 
-      }
-
-      if (!device.hasOwnProperty('otaTargetFirmwareVersion')) {
-        device.otaTargetFirmwareVersion = 0; 
-      }
-
-      return device;
-    }.bind(this), this);
-
-    if (this.urlParameters.hasOwnProperty('groups')) {
-      this.groups = _.map(messageParsed.groups, function(group) {
-        return group;
-      }.bind(this), this);
+    if (messageParsed.gatewayEui !== undefined) {
+      this.gatewayEui = messageParsed.gatewayEui;
     }
 
-    var removedDisconnectedDevices = this.pruneRulesOfDisconnectedDevices(messageParsed.cloudRules);
-    var formattedCloudRules = this.convertRulesFromIndex(removedDisconnectedDevices);
-    this.cloudRules = formattedCloudRules; 
+    if (messageParsed.devices !== undefined) {
+      this.devices = _.map(messageParsed.devices, function(device) {
+        device.gatewayEui = this.gatewayEui;
+        this.removeNodeInfoInLists(device);
+        this.pushNodeInfoToNodeLists(device);
+
+        if (!device.hasOwnProperty('otaUpdating')) {
+          device.otaUpdating = false;
+        }
+
+        if (!device.hasOwnProperty('otaTotalBytesSent')) {
+          device.otaTotalBytesSent = 0;
+        }
+
+        if (!device.hasOwnProperty('otaUpdatePercent')) {
+          device.otaUpdatePercent = 0;
+        }
+
+        if (!device.hasOwnProperty('otaTargetImageSizeKB')) {
+          device.otaTargetImageSizeKB = 0;
+        }
+
+        if (!device.hasOwnProperty('otaTargetFirmwareVersion')) {
+          device.otaTargetFirmwareVersion = 0;
+        }
+
+        return device;
+      }.bind(this), this);
+
+      this.startUpNodeListsUpdate = false;
+    }
+
+    if (messageParsed.groups !== undefined &&
+        messageParsed.groups.length > 0) {
+      if (this.urlParameters.groups !== undefined &&
+          this.urlParameters.hasOwnProperty('groups')) {
+        this.groups = _.map(messageParsed.groups, function(group) {
+          return group;
+        }.bind(this), this);
+      }
+    }
+
+    if (messageParsed.cloudRules !== undefined) {
+      var removedDisconnectedDevices = this.pruneRulesOfDisconnectedDevices(messageParsed.cloudRules);
+      var formattedCloudRules = this.convertRulesFromIndex(removedDisconnectedDevices);
+      this.cloudRules = formattedCloudRules;
+    }
 
     this.devices = this.devices.concat(this.groups);
     this.emit('change');
   },
 
+  onDeviceUpdate: function(messageParsed) {
+    this.devices = _.map(this.devices, function(deviceInList) {
+      //If device is in list
+      if ((deviceInList.deviceEndpoint.eui64 === messageParsed.deviceEndpoint.eui64) &&
+         (deviceInList.deviceEndpoint.endpoint === messageParsed.deviceEndpoint.endpoint)) {
+        deviceInList = messageParsed;
+        return deviceInList;
+      } else {
+        return deviceInList;
+      }
+    }, this);
+
+    this.emit('change');
+  },
+
+  onDeviceLeft: function(leftNodeEui) {
+    _.remove(this.devices, function(device) {
+      return (device.deviceEndpoint.eui64 === leftNodeEui)
+    });
+    this.removeNodeInfoInListsWithEuiOnly(leftNodeEui);
+    this.emit('change');
+  },
+
+  onTrafficTestResults: function(testresults) {
+    // Add contact to node data
+    this.tests.push(testresults);
+    this.testing = false;
+    this.emit('change');
+  },
+
+  onRulesListUpdated: function(state) {
+    var removedDisconnectedDevices = this.pruneRulesOfDisconnectedDevices(state.relays);
+    var formattedRules = this.convertRulesFromIndex(removedDisconnectedDevices);
+    this.rules = formattedRules;
+    this.emit('change');
+  },
+
   onHeartbeat: function(info) {
     this.heartbeat = info;
+    this.emit('change');
+  },
+
+  onNetworkSecurityLevel: function(data) {
+    this.networkSecurityLevel = data;
     this.emit('change');
   },
 
@@ -152,8 +194,75 @@ var Store = Fluxxor.createStore({
     this.emit('change');
   },
 
+  removeNodeInfoInLists: function(node) {
+    _.remove(this.inputNodesList, function(inputNode) {
+      return ((inputNode.deviceEndpoint.eui64 === node.deviceEndpoint.eui64) &&
+              (inputNode.deviceEndpoint.endpoint === node.deviceEndpoint.endpoint))
+    });
+    _.remove(this.outputNodesList, function(outputNode) {
+      return ((outputNode.deviceEndpoint.eui64 === node.deviceEndpoint.eui64) &&
+              (outputNode.deviceEndpoint.endpoint === node.deviceEndpoint.endpoint))
+    });
+  },
+
+  removeNodeInfoInListsWithEuiOnly: function(eui64) {
+    _.remove(this.inputNodesList, function(inputNode) {
+      return (inputNode.deviceEndpoint.eui64 === eui64)
+    });
+    _.remove(this.outputNodesList, function(outputNode) {
+      return (outputNode.deviceEndpoint.eui64 === eui64)
+    });
+  },
+
+  pushNodeInfoToNodeLists: function(node) {
+    // deviceEndpoint: {clusterInfo:[{clusterId:'0x0001',clusterType:'Out'},{...},...]}
+    var clusterInfo = node.deviceEndpoint.clusterInfo;
+    clusterInfo.forEach((clusterValue) => {
+      if (nodeListBindableClusters[parseInt(clusterValue.clusterId)] !== undefined) {
+        var nodeInfo = this.createNodeInfoTemplate(node);
+        nodeInfo.deviceEndpoint.clusterId = clusterValue.clusterId;
+        if (parseInt(clusterValue.clusterId) >= Constants.IN_OUT_DECISION_CLUSTER) {
+          if (clusterValue.clusterType === "Out") {
+            this.outputNodesList.push(nodeInfo);
+          } else if (clusterValue.clusterType === "In") {
+            this.inputNodesList.push(nodeInfo);
+          }
+        } else {
+          if (clusterValue.clusterType == 'In') {
+            this.outputNodesList.push(nodeInfo);
+          } else if (clusterValue.clusterType == 'Out') {
+            this.inputNodesList.push(nodeInfo);
+          }
+        }
+      }
+    });
+  },
+
+  createNodeInfoTemplate: function(node) {
+    var nodeInfo = {};
+    var deviceEndpoint = {};
+    nodeInfo.nodeId = node.nodeId;
+    nodeInfo.deviceType = node.deviceType;
+    nodeInfo.supportsRelay = node.supportsRelay;
+    deviceEndpoint.eui64 = node.deviceEndpoint.eui64;
+    deviceEndpoint.endpoint = node.deviceEndpoint.endpoint;
+    nodeInfo.deviceEndpoint = deviceEndpoint;
+    return nodeInfo;
+  },
+
   getOTAList: function() {
     return this.otafiles;
+  },
+
+  getBuildInfo: function(callback) {
+    if (this.buildinfo === '') {
+      $.getJSON('/assets/version.json', function(data) {
+        this.buildinfo = data;
+        callback(this.buildinfo);
+      }.bind(this));
+    } else {
+      callback(this.buildinfo);
+    }
   },
 
   otaFilesReceived: function(otafiles) {
@@ -161,20 +270,13 @@ var Store = Fluxxor.createStore({
     this.emit('change');
   },
 
-  onRulesListUpdated: function(state) {
-    var removedDisconnectedDevices = this.pruneRulesOfDisconnectedDevices(state.relays);
-    var formattedRules = this.convertRulesFromIndex(removedDisconnectedDevices);
-    this.rules = formattedRules;
-    this.emit('change');
-  },
-
   loadTrafficTestLog: function(log) {
-    this.testLog = log; 
+    this.testLog = log;
     this.emit('change');
   },
 
   loadServerLog: function(log) {
-    this.serverLog = log; 
+    this.serverLog = log;
     this.emit('change');
   },
 
@@ -193,53 +295,25 @@ var Store = Fluxxor.createStore({
     this.emit('change');
   },
 
+  updateInstallCodeFromServer: function(data) {
+    this.installCodeFromServer = data.installCode;
+    this.emit('change');
+  },
+
   getLog: function() {
     return this.logText;
   },
 
-  onDeviceUpdate: function(messageParsed) {
-    this.devices = _.map(this.devices, function(deviceInList) {
-      //If device is in list
-      if ((deviceInList.deviceEndpoint.eui64 === messageParsed.deviceEndpoint.eui64) && 
-         (deviceInList.deviceEndpoint.endpoint === messageParsed.deviceEndpoint.endpoint)) {
-        deviceInList = messageParsed;
-        return deviceInList; 
-      } else {
-        return deviceInList;
-      }
-    }, this);
-    
-    this.emit('change');
-  },
-
-  onTrafficTestResults: function(testresults) {
-    // Add contact to node data
-    this.tests.push(testresults);
-    this.testing = false;
-    this.emit('change');
-  },
-
-  onDeviceLeft: function(leftNode) {
-    _.remove(this.devices, function(device) {
-      return ((device.deviceEndpoint.eui64 === leftNode.deviceEndpoint.eui64) && 
-              (device.deviceEndpoint.endpoint === leftNode.deviceEndpoint.endpoint))
-    });
-
-    this.emit('change');
-  },
-
-  onDeviceJoined: function(newNode) {
-    _.remove(this.devices, function(device) {
-      return ((device.deviceEndpoint.eui64 === newNode.deviceEndpoint.eui64) && 
-              (device.deviceEndpoint.endpoint === newNode.deviceEndpoint.endpoint))
-    });
-
-    this.devices.push(newNode);
-    this.emit('change');
-  },
-
   getGW: function() {
     return this.gatewayEui;
+  },
+
+  getNetworkSecurityLevel:function() {
+    return this.networkSecurityLevel;
+  },
+
+  setNetworkSecurityLevel:function(securityLevel) {
+    this.networkSecurityLevel = securityLevel;
   },
 
   removeAllGroups: function() {
@@ -248,7 +322,7 @@ var Store = Fluxxor.createStore({
       return !(deviceType === 'group');
     });
 
-    this.devices = items; 
+    this.devices = items;
   },
 
   getDevices: function() {
@@ -256,31 +330,39 @@ var Store = Fluxxor.createStore({
   },
 
   pruneRulesOfDisconnectedDevices: function(rulesupdate) {
-    // Split into form [{"eui64":"000B57FFFE1938FD", "endpoint":1}, ...]
+    // Split into form [{"eui64":"000B57FFFE1938FD", "endpoint":1, "clusterInfo":[]}, ...]
     var deviceEndpoints = _.pluck(this.devices, 'deviceEndpoint');
-    // Split into form {<eui64>:{"eui64":"000B57FFFE1938FD", "endpoint":1}, 
+    // Split into form {"eui64":"000B57FFFE1938FD", "endpoint":1, "clusterInfo":[]},
     // <eui64>:{"eui64":"000B57FFFE1938FD", "endpoint":1}...}
     var devicesByEui = _.groupBy(deviceEndpoints, 'eui64');
 
     var filtered = _.filter(rulesupdate, function(rule) {
-      return !((devicesByEui[rule.inDeviceEndpoint.eui64] === undefined) &&
-          (devicesByEui[rule.outDeviceEndpoint.eui64] === undefined))
+      return (devicesByEui[rule.inDeviceEndpoint.eui64] !== undefined) &&
+              (devicesByEui[rule.outDeviceEndpoint.eui64] !== undefined)
     });
 
-    return filtered; 
+    return filtered;
   },
 
   getDeviceByEuiAndEndpoint: function(eui64, endpoint) {
     return _.find(this.devices, function(device) {
-      return (device.deviceEndpoint.eui64 === eui64 && 
+      return (device.deviceEndpoint.eui64 === eui64 &&
         device.deviceEndpoint.endpoint === endpoint)
     });
-  }, 
+  },
+
+  getInstallCodeFromServer: function() {
+    return this.installCodeFromServer;
+  },
+
+  resetInstallCodeFromServer: function() {
+    this.installCodeFromServer = '';
+  },
 
   convertRulesFromIndex: function(rulesupdate) {
-    // Split into form [{"eui64":"000B57FFFE1938FD", "endpoint":1}, ...]
+    // Split into form [{"eui64":"000B57FFFE1938FD", "endpoint":1,"clusterInfo":[]}, ...]
     var deviceEndpoints = _.pluck(this.devices, 'deviceEndpoint');
-    // Split into form {<eui64>:{"eui64":"000B57FFFE1938FD", "endpoint":1}, 
+    // Split into form {<eui64>:{"eui64":"000B57FFFE1938FD", "endpoint":1},
     // <eui64>:{"eui64":"000B57FFFE1938FD", "endpoint":1}...}
     var devicesByEui = _.groupBy(deviceEndpoints, 'eui64');
 
@@ -288,52 +370,61 @@ var Store = Fluxxor.createStore({
       if (devicesByEui[rule.inDeviceEndpoint.eui64] !== undefined &&
           devicesByEui[rule.outDeviceEndpoint.eui64] !== undefined) {
 
-        var fromData = this.getDeviceByEuiAndEndpoint(rule.inDeviceEndpoint.eui64, 
-                                                      rule.inDeviceEndpoint.endpoint)
-        var toData = this.getDeviceByEuiAndEndpoint(rule.outDeviceEndpoint.eui64, 
-                                                    rule.outDeviceEndpoint.endpoint)
+        var fromDataDevice = this.getDeviceByEuiAndEndpoint(rule.inDeviceEndpoint.eui64,
+                                                            rule.inDeviceEndpoint.endpoint)
+        var toDataDevice = this.getDeviceByEuiAndEndpoint(rule.outDeviceEndpoint.eui64,
+                                                          rule.outDeviceEndpoint.endpoint)
+        var fromData = this.createNodeInfoTemplate(fromDataDevice);
+        var toData = this.createNodeInfoTemplate(toDataDevice);
+        // Append clusterId.
+        fromData.deviceEndpoint.clusterId = rule.inDeviceEndpoint.clusterId;
+        toData.deviceEndpoint.clusterId = rule.outDeviceEndpoint.clusterId;
 
         return {
           fromEui64: rule.inDeviceEndpoint.eui64,
-          toEui64: rule.outDeviceEndpoint.eui64, 
+          toEui64: rule.outDeviceEndpoint.eui64,
           fromData: fromData,
           toData: toData
-        };
-      } else {
-        return {
-          fromEui64: null,
-          toEui64: null, 
-          fromData: null,
-          toData: null
         };
       }
     });
   },
-  
-  /* Gets rules with additional data populated from device list */
+
+  /* Get rules with additional data populated from device list */
   getRules: function() {
-    return this.rules; 
+    return this.rules;
   },
 
   getCloudRules: function() {
-    return this.cloudRules; 
+    return this.cloudRules;
   },
 
+  /* Update rules in Store */
   addRule: function(fromNode, toNode) {
-    this.rules.push({fromEui64: fromNode.nodeEui, fromData: fromNode, toEui64: toNode.nodeEui, toData: toNode});
+    this.rules.push({fromEui64: fromNode.deviceEndpoint.eui64, fromData: fromNode,
+                      toEui64: toNode.deviceEndpoint.eui64, toData: toNode});
     this.emit('change');
   },
 
-  clearRules: function() {
+  addCloudRule: function(fromNode, toNode) {
+    this.cloudRules.push({fromEui64: fromNode.deviceEndpoint.eui64, fromData: fromNode,
+                      toEui64: toNode.deviceEndpoint.eui64, toData: toNode});
+    this.emit('change');
+  },
+
+  clearAllRules: function() {
     this.rules = [];
+    this.cloudRules = [];
     this.emit('change');
   },
 
   deleteRule: function(ruleToDelete) {
     this.rules.forEach((rule, key) => {
-      if (rule.fromData.deviceEndpoint.eui64 === ruleToDelete.from.data.deviceEndpoint.eui64 && 
-          rule.toData.deviceEndpoint.eui64 === ruleToDelete.to.data.deviceEndpoint.eui64) {
-        this.rules.splice(key, 1)
+      if (this.isDeviceEndpointIdentical(rule.fromData.deviceEndpoint,
+                                          ruleToDelete.fromData.deviceEndpoint) &&
+          this.isDeviceEndpointIdentical(rule.toData.deviceEndpoint,
+                                          ruleToDelete.toData.deviceEndpoint)) {
+        this.rules.splice(key, 1);
       }
     });
     this.emit('change');
@@ -341,15 +432,135 @@ var Store = Fluxxor.createStore({
 
   deleteCloudRule: function(ruleToDelete) {
     this.cloudRules.forEach((rule, key) => {
-      if (rule.fromData.deviceEndpoint.eui64 === ruleToDelete.from.data.deviceEndpoint.eui64 && 
-          rule.toData.deviceEndpoint.eui64 === ruleToDelete.to.data.deviceEndpoint.eui64) {
-        this.cloudRules.splice(key, 1)
+      if (this.isDeviceEndpointIdentical(rule.fromData.deviceEndpoint,
+                                          ruleToDelete.fromData.deviceEndpoint) &&
+          this.isDeviceEndpointIdentical(rule.toData.deviceEndpoint,
+                                          ruleToDelete.toData.deviceEndpoint)) {
+        this.cloudRules.splice(key, 1);
       }
     });
     this.emit('change');
   },
 
+  filterRulesListForDeletion: function(inputNode, outputNode) {
+    var rules = this.rules;
+    var cloudRules = this.cloudRules;
+
+    var rulesList = rules.map(function(rule) {
+      if (inputNode.deviceEndpoint.eui64 === rule.fromData.deviceEndpoint.eui64 &&
+           inputNode.deviceEndpoint.endpoint === rule.fromData.deviceEndpoint.endpoint &&
+           outputNode.deviceEndpoint.eui64 === rule.toData.deviceEndpoint.eui64 &&
+           outputNode.deviceEndpoint.endpoint === rule.toData.deviceEndpoint.endpoint) {
+        return rule;
+      }
+    }).filter(function(item) {
+      return item !== undefined;
+    });
+    var cloudRulesList = cloudRules.map(function(rule) {
+      if (inputNode.deviceEndpoint.eui64 === rule.fromData.deviceEndpoint.eui64 &&
+           inputNode.deviceEndpoint.endpoint === rule.fromData.deviceEndpoint.endpoint &&
+           outputNode.deviceEndpoint.eui64 === rule.toData.deviceEndpoint.eui64 &&
+           outputNode.deviceEndpoint.endpoint === rule.toData.deviceEndpoint.endpoint) {
+        return rule;
+      }
+    }).filter(function(item) {
+      return item !== undefined;
+    });
+    return rulesList.concat(cloudRulesList);
+  },
+
+  filterRulesListForCreation: function(inputNode, outputNode) {
+    var rulesList = [];
+    var inputNodesList = this.inputNodesList;
+    var outputNodesList = this.outputNodesList;
+
+    var supportedInputNodeList = inputNodesList.map(function(inputNodeInfoInLocalList) {
+      if (inputNodeInfoInLocalList.deviceEndpoint.eui64 === inputNode.deviceEndpoint.eui64 &&
+          inputNodeInfoInLocalList.deviceEndpoint.endpoint === inputNode.deviceEndpoint.endpoint) {
+        var tempNodeInfo = {};
+        tempNodeInfo = inputNodeInfoInLocalList;
+        return tempNodeInfo;
+      }
+    }).filter(function(item) {
+      return item !== undefined;
+    });
+
+    supportedInputNodeList.forEach(function(supportedInputNodeInfo) {
+      var supportedOutputNodeInfoForRelayRule = outputNodesList.find(function(outputNodeInfoInLocalList) {
+        return outputNodeInfoInLocalList.deviceEndpoint.eui64 === outputNode.deviceEndpoint.eui64 &&
+               outputNodeInfoInLocalList.deviceEndpoint.endpoint === outputNode.deviceEndpoint.endpoint &&
+               outputNodeInfoInLocalList.deviceEndpoint.clusterId === supportedInputNodeInfo.deviceEndpoint.clusterId;
+      });
+      var supportedOutputNodeInfoForCloudRule = outputNodesList.find(function(outputNodeInfoInLocalList) {
+        var isCloudRuleSupported = false;
+        var filteredCloudRule = supportedBindingInCloudRules.find(function(item) {
+          return item.inputCluster === parseInt(supportedInputNodeInfo.deviceEndpoint.clusterId);
+        });
+        if (filteredCloudRule !== undefined &&
+            parseInt(outputNodeInfoInLocalList.deviceEndpoint.clusterId) === filteredCloudRule.outputCluster) {
+          isCloudRuleSupported = true;
+        }
+        return outputNodeInfoInLocalList.deviceEndpoint.eui64 === outputNode.deviceEndpoint.eui64 &&
+               outputNodeInfoInLocalList.deviceEndpoint.endpoint === outputNode.deviceEndpoint.endpoint &&
+               isCloudRuleSupported;
+      });
+      if (supportedOutputNodeInfoForRelayRule !== undefined) {
+        var rule = {};
+        rule.inputNodeInfoInRule = supportedInputNodeInfo;
+        rule.outputNodeInfoInRule = supportedOutputNodeInfoForRelayRule;
+        rulesList.push(rule);
+      }
+      if (supportedOutputNodeInfoForCloudRule !== undefined) {
+        var rule = {};
+        rule.inputNodeInfoInRule = supportedInputNodeInfo;
+        rule.outputNodeInfoInRule = supportedOutputNodeInfoForCloudRule;
+        rulesList.push(rule);
+      }
+    });
+    return rulesList;
+  },
+
   getHumanReadableDevice: function(device) {
+    var humanFriendlyDisplay = this.getHumanNameAndImageForDevice(device);
+    return {
+      name: humanFriendlyDisplay.humanName + ' - ' + device.nodeId +
+            ' - ' + device.deviceEndpoint.endpoint +
+            ' - (' + nodestate[device.deviceState] + ')',
+      simplename: humanFriendlyDisplay.humanName + ' - ' + device.nodeId +
+            ' - ' + device.deviceEndpoint.endpoint,
+      image: humanFriendlyDisplay.image,
+      data: device,
+      ready: device.deviceState >= Constants.ND_JOINED
+    };
+  },
+
+  getHumanReadableDevices: function(devices) {
+    if (!devices) {
+      devices = this.getDevices();
+    }
+    return _.map(devices, this.getHumanReadableDevice);
+  },
+
+  getSupportedClutersInfo: function(device) {
+    return device.supportedCluster;
+  },
+
+  getHumanReadableNodeForRulesList: function(node) {
+    var humanFriendlyDisplay = this.getHumanNameAndImageForDevice(node);
+    return {
+      name: node.nodeId + ' - ' +
+        node.deviceEndpoint.clusterId + ' - ' +
+        node.deviceEndpoint.endpoint,
+      simplename: humanFriendlyDisplay.humanName + ' - ' +
+        node.nodeId + ' - ' +
+        node.deviceEndpoint.endpoint,
+      image: humanFriendlyDisplay.image,
+      data: node,
+      ready: node.deviceState >= Constants.ND_JOINED
+    };
+  },
+
+  getHumanNameAndImageForDevice: function(device) {
     var deviceType = parseInt(device.deviceType);
     var humanName;
     var image = null;
@@ -368,29 +579,15 @@ var Store = Fluxxor.createStore({
     } else if (smartplugs[deviceType]) {
       image = 'assets/outlet.png';
       humanName = smartplugs[deviceType];
-    } else if (deviceType === 'group') {
-      return {
-        name: device.groupName,
-        simplename: device.groupName,
-        image: 'assets/3bulb.png',
-        data: device
-      };
+    } else {
+      image = 'assets/silicon-labs-logo.png';
+      humanName = 'Unknown Type Device';
     }
 
     return {
-      name: humanName + ' - ' + device.nodeId + ' - (' + nodestate[device.deviceState] + ')',
-      simplename: humanName + ' - ' + device.nodeId,
-      image: image,
-      data: device,
-      ready: device.deviceState >= Constants.ND_JOINED
+      humanName,
+      image
     };
-  },
-
-  getHumanReadableDevices: function(devices) {
-    if (!devices) {
-      devices = this.getDevices();
-    }
-    return _.map(devices, this.getHumanReadableDevice);
   },
 
   getHumanReadableLights: function(devices) {
@@ -404,8 +601,8 @@ var Store = Fluxxor.createStore({
     return _.map(this.getRules(), function(rule) {
       if (rule.toData && rule.fromData) {
         return {
-          to: this.getHumanReadableDevice(rule.toData),
-          from: this.getHumanReadableDevice(rule.fromData)
+          to: this.getHumanReadableNodeForRulesList(rule.toData),
+          from: this.getHumanReadableNodeForRulesList(rule.fromData)
         };
       }
     }.bind(this));
@@ -415,11 +612,29 @@ var Store = Fluxxor.createStore({
     return _.map(this.getCloudRules(), function(rule) {
       if (rule.toData && rule.fromData) {
         return {
-          to: this.getHumanReadableDevice(rule.toData),
-          from: this.getHumanReadableDevice(rule.fromData)
+          to: this.getHumanReadableNodeForRulesList(rule.toData),
+          from: this.getHumanReadableNodeForRulesList(rule.fromData)
         };
       }
     }.bind(this));
+  },
+
+  syncNodesOnRuleCreation: function(inputNode, outputNode) {
+    var inputNodeWithAttribute = inputNode;
+    var outputNodeWithAttribute = outputNode;
+    var inputNodeClusterId = inputNode.deviceEndpoint.clusterId;
+    var device = this.getDeviceByEuiAndEndpoint(inputNode.deviceEndpoint.eui64,
+                                                inputNode.deviceEndpoint.endpoint);
+
+    if (parseInt(inputNodeClusterId) === Constants.OCCUPANCY_CLUSTER &&
+        parseInt(outputNodeClusterId) === Constants.ON_OFF_CLUSTER) {
+      inputNodeWithAttribute.occupancyReading = device.occupancyReading;
+      Flux.actions.syncNodesOnRuleCreation(inputNodeWithAttribute, outputNode);
+    } else if (parseInt(inputNodeClusterId) === Constants.IAS_ZONE_CLUSTER &&
+                parseInt(outputNodeClusterId) === Constants.ON_OFF_CLUSTER) {
+      inputNodeWithAttribute.contactState = device.contactState;
+      Flux.actions.syncNodesOnRuleCreation(inputNodeWithAttribute, outputNode);
+    }
   },
 
   isLight: function(device) {
@@ -437,7 +652,7 @@ var Store = Fluxxor.createStore({
     return sensors[deviceType] === 'Contact Sensor';
   },
 
-  isTemp: function(device) {
+  isMultiSensor: function(device) {
     var deviceType = parseInt(device.deviceType);
     return sensors[deviceType] === 'Multi Sensor';
   },
@@ -450,6 +665,30 @@ var Store = Fluxxor.createStore({
   isOccupancy: function(device) {
     var deviceType = parseInt(device.deviceType);
     return sensors[deviceType] === 'Occupancy Sensor';
+  },
+
+  isDeviceEndpointIdentical: function(deviceEndpoint0, deviceEndpoint1) {
+    return (deviceEndpoint0.eui64 === deviceEndpoint1.eui64 &&
+            deviceEndpoint0.endpoint === deviceEndpoint1.endpoint) ? true : false;
+  },
+
+  isExistingRuleDetected: function(inputNode, outputNode, rulesList) {
+    var ruleDetected = false;
+    rulesList.forEach((rule) => {
+      if (this.isDeviceEndpointIdentical(rule.fromData.deviceEndpoint, inputNode.deviceEndpoint) &&
+          this.isDeviceEndpointIdentical(rule.toData.deviceEndpoint, outputNode.deviceEndpoint)) {
+        ruleDetected = true;
+      }
+    });
+    return ruleDetected;
+  },
+
+  getInputNodes: function() {
+    return this.inputNodesList;
+  },
+
+  getOutputNodes: function() {
+    return this.outputNodesList;
   },
 
   getSwitches: function() {
@@ -466,59 +705,281 @@ var Store = Fluxxor.createStore({
     });
   },
 
-  testDevices: function() {
+  /* ReactUI validation tests. */
+  testJoinDimmer: function() {
+    this.onDeviceJoined(
+      {
+        nodeId: '0x105',
+        deviceState: 16,
+        deviceType: 261,
+        supportsRelay: true,
+        deviceEndpoint: {
+          eui64: '000000000000D105',
+          endpoint: 1,
+          clusterInfo: [
+            {clusterId: '0x0006', clusterType: 'Out'},
+            {clusterId: '0x0008', clusterType: 'Out'},
+            {clusterId: '0x0300', clusterType: 'Out'},
+            {clusterId: '0x0001', clusterType: 'In'},
+            {clusterId: '0x0003', clusterType: 'In'}
+          ]
+        },
+        supportedCluster: [
+        ]
+      }
+    );
+  },
+
+  testJoinColorControlLight: function() {
+    this.onDeviceJoined(
+      {
+        nodeId: '0x0102',
+        deviceState: 16,
+        deviceType: 258,
+        supportsRelay: true,
+        deviceEndpoint: {
+          eui64: '000000000000D258',
+          endpoint: 1,
+          clusterInfo: [
+            {clusterId: '0x0006', clusterType: 'In'},
+            {clusterId: '0x0008', clusterType: 'In'},
+            {clusterId: '0x0300', clusterType: 'In'},
+            {clusterId: '0x0000', clusterType: 'In'},
+            {clusterId: '0x0003', clusterType: 'In'}
+          ]
+        },
+        supportedCluster: [
+        ]
+      }
+    );
+  },
+
+  testJoinOccupancy: function() {
+    this.onDeviceJoined(
+      {
+        nodeId: '0x0107',
+        deviceState: 16,
+        deviceType: 263,
+        supportsRelay: false,
+        deviceEndpoint: {
+          eui64: '000000000000D107',
+          endpoint: 1,
+          clusterInfo: [
+            {clusterId: '0x0001', clusterType: 'In'},
+            {clusterId: '0x0003', clusterType: 'In'},
+            {clusterId: '0x0406', clusterType: 'In'}
+          ]
+        },
+        supportedCluster: [
+        ]
+      }
+    );
+  },
+
+  testNodeJoinMixTypes: function() {
     this.onDeviceJoined({
-      nodeEui: '0000000000001234',
-      nodeId: 'D283',
-      deviceTableIndex: 0,
+      nodeId: '0xD234',
       deviceState: 16,
-      endpoints: [
-        {endpointNumber: 1, deviceType: 258} 
+      deviceType: 200,
+      supportsRelay: false,
+      deviceEndpoint: {
+        eui64: '000000000000D234',
+        endpoint: 1,
+        clusterInfo: [
+          {clusterId: '0x1234', clusterType: 'In'},
+          {clusterId: '0x1235', clusterType: 'In'}
+        ]
+      },
+      supportedCluster: [
+        {clusterId: '0x1234', clusterType: 'In'},
+        {clusterId: '0x1235', clusterType: 'In'}
       ]
     });
 
     this.onDeviceJoined({
-      nodeEui: '0000000000001236',
-      nodeId: 'D284',
-      deviceTableIndex: 1,
+      nodeId: '0xD235',
       deviceState: 16,
-      endpoints: [
-        {endpointNumber: 1, deviceType: 261} 
+      deviceType: 258,
+      supportsRelay: true,
+      deviceEndpoint: {
+        eui64: '000000000000D235',
+        endpoint: 1,
+        clusterInfo: [
+          {clusterId: '0x1236', clusterType: 'Out'},
+          {clusterId: '0x1237', clusterType: 'Out'}
+        ]
+      },
+      supportedCluster: [
+        {clusterId: '0x1236', clusterType: 'Out'},
+        {clusterId: '0x1237', clusterType: 'Out'}
       ]
     });
+  },
 
-    this.onDeviceJoined({
-      nodeEui: '0000000000001235',
-      nodeId: 'D285',
-      deviceTableIndex: 2,
-      contactState: 1,
-      tamperState: 1,
-      deviceState: 16,
-      temperatureValue: "75.33",
-      endpoints: [
-        {endpointNumber: 1, deviceType: 1026} 
-      ]
+  testDeviceListUpdateVoid: function() {
+    this.onDeviceListUpdated({
+      devices: [],
+      cloudRules: [],
+      groups: [],
+      gatewayEui: '000D100010001000'
+    });
+  },
+
+  testDeviceListUpdateNoCloudRelay: function() {
+    this.onDeviceListUpdated({
+      devices: [
+        // Dimmable Color Light 1.
+        {
+          nodeId: '0xD234',
+          deviceState: 16,
+          deviceType: 258,
+          supportsRelay: false,
+          deviceEndpoint: {
+            eui64: '000000000000D234',
+            endpoint: 1,
+            clusterInfo: [
+              {clusterId: '0x1234', clusterType: 'In'},
+              {clusterId: '0x1235', clusterType: 'In'}
+            ]
+          },
+          supportedCluster: [
+            {clusterId: '0x1234', clusterType: 'In'},
+            {clusterId: '0x1235', clusterType: 'In'}
+          ]
+        },
+        // Dimmable Color Light 2.
+        {
+          nodeId: '0xD234',
+          deviceState: 16,
+          deviceType: 258,
+          supportsRelay: false,
+          deviceEndpoint: {
+            eui64: '000000000000D234',
+            endpoint: 2,
+            clusterInfo: [
+              {clusterId: '0x1234', clusterType: 'In'},
+              {clusterId: '0x1235', clusterType: 'In'}
+            ]
+          },
+          supportedCluster: [
+            {clusterId: '0x1234', clusterType: 'In'},
+            {clusterId: '0x1235', clusterType: 'In'}
+          ]
+        },
+        // Contact sensor.
+        {
+          nodeId: '0xD230',
+          deviceState: 16,
+          deviceType: 1026,
+          supportsRelay: false,
+          deviceEndpoint: {
+            eui64: '000000000000D230',
+            endpoint: 1,
+            clusterInfo: [
+              {clusterId: '0x1236', clusterType: 'Out'},
+              {clusterId: '0x1237', clusterType: 'Out'}
+            ]
+          },
+          supportedCluster: [
+            {clusterId: '0x1236', clusterType: 'Out'},
+            {clusterId: '0x1237', clusterType: 'Out'}
+          ]
+        },
+        // Occupancy sensor.
+        {
+          nodeId: '0xD235',
+          deviceState: 16,
+          deviceType: 263,
+          supportsRelay: false,
+          deviceEndpoint: {
+            eui64: '000000000000D235',
+            endpoint: 1,
+            clusterInfo: [
+              {clusterId: '0x1236', clusterType: 'Out'},
+              {clusterId: '0x1237', clusterType: 'Out'}
+            ]
+          },
+          supportedCluster: [
+            {clusterId: '0x1236', clusterType: 'Out'},
+            {clusterId: '0x1237', clusterType: 'Out'}
+          ]
+        },
+        // Unknown type.
+        {
+          nodeId: '0xD237',
+          deviceState: 16,
+          deviceType: 200,
+          supportsRelay: true,
+          deviceEndpoint: {
+            eui64: '000000000000D237',
+            endpoint: 1,
+            clusterInfo: [
+              {clusterId: '0x1234', clusterType: 'Out'},
+              {clusterId: '0x1235', clusterType: 'Out'}
+            ]
+          },
+          supportedCluster: [
+            {clusterId: '0x1234', clusterType: 'Out'},
+            {clusterId: '0x1235', clusterType: 'Out'}
+          ]
+        }
+      ],
+      cloudRules: [
+        {
+          inDeviceEndpoint: {
+            eui64: '000000000000D235',
+            endpoint: 1,
+            clusterId: '0x1236'
+          },
+          outDeviceEndpoint: {
+            eui64: '000000000000D234',
+            endpoint: 2,
+            clusterId: '0x1235'
+          }
+        },
+        {
+          inDeviceEndpoint: {
+            eui64: '000000000000D235',
+            endpoint: 1,
+            clusterId: '0x1237'
+          },
+          outDeviceEndpoint: {
+            eui64: '000000000000D234',
+            endpoint: 2,
+            clusterId: '0x1234'
+          }
+        }
+      ],
+      groups: [],
+      gatewayEui: '000D100010001000'
     });
 
-    this.onDeviceJoined({
-      nodeEui: '0000000000001236',
-      nodeId: 'D286',
-      deviceTableIndex: 3,
-      contactState: 0,
-      tamperState: 0,
-      deviceState: 16,
-      endpoints: [
-        {endpointNumber: 1, deviceType: 1026} 
-      ]
-    });
-
-    this.onDeviceJoined({
-      nodeEui: '0000000000001237',
-      nodeId: 'D287',
-      deviceTableIndex: 4,
-      deviceState: 16,
-      endpoints: [
-        {endpointNumber: 1, deviceType: 1026} 
+    this.onRulesListUpdated({
+      relays:[
+        {
+          inDeviceEndpoint: {
+            eui64: '000000000000D237',
+            endpoint: 1,
+            clusterId: '0x1234'
+          },
+          outDeviceEndpoint: {
+            eui64: '000000000000D234',
+            endpoint: 2,
+            clusterId: '0x1235'
+          }
+        },
+        {
+          inDeviceEndpoint: {
+            eui64: '000000000000D237',
+            endpoint: 1,
+            clusterId: '0x1235'
+          },
+          outDeviceEndpoint: {
+            eui64: '000000000000D234',
+            endpoint: 2,
+            clusterId: '0x1234'
+          }
+        }
       ]
     });
   }

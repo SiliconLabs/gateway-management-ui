@@ -151,10 +151,11 @@ var SocketIOLoggerServer = winston.transports.SocketIOLoggerServer = function(op
 util.inherits(SocketIOLoggerServer, winston.Transport);
  
 SocketIOLoggerServer.prototype.log = function(level, msg, meta, callback) {
+  var d = new Date();
   if (Logger.logStreaming && 
     !DeviceController.gatewaySettings.trafficReporting && 
     !DeviceController.serverSettings.otaInProgress) {
-      io.sockets.emit('serverlogstream', this.timestamp + ' ' + msg + '\n\r');
+      io.sockets.emit('serverlogstream', d.yyyymmddhhmmssfff() + ' ' + msg + '\n\r');
   }
   callback(null, true);
 };

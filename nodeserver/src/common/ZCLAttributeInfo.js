@@ -2,7 +2,7 @@
 
 var Constants = require('./Constants');
 
-var DEFAULT_MAX_REPORTING = 1800; 
+var DEFAULT_MAX_REPORTING = 1800;
 
 var ZCLAttributeInfo = {
    firmwareVersion: {
@@ -32,7 +32,7 @@ var ZCLAttributeInfo = {
     defaultReportingMin: 1,
     defaultReportingMax: DEFAULT_MAX_REPORTING
   },
-  // kWh = divisor 3600000 format = 51 multi = 1 units = 0, 
+  // kWh = divisor 3600000 format = 51 multi = 1 units = 0,
   // 1*(value)/3600000 kWh = 0.001 kWh
   // 3600 is 1 wh
   powersumValue: {
@@ -56,7 +56,7 @@ var ZCLAttributeInfo = {
     defaultReportingMax: DEFAULT_MAX_REPORTING
   },
   // Current Humidity: MeasuredVal = 100 x Relative Humidity (0 to 100% in 0.01% increments)
-  // So 500 / 100 = 5% and 10000 / 100 = 100% 
+  // So 500 / 100 = 5% and 10000 / 100 = 100%
   // Threshhold is 500
   humidityReading: {
     clusterID: Constants.HUMIDITY_CLUSTER,
@@ -67,7 +67,7 @@ var ZCLAttributeInfo = {
     defaultReportingMin: 1,
     defaultReportingMax: DEFAULT_MAX_REPORTING
   },
-  // Illuminance: MeasuredValue = 10,000 * log10 (lux+1) 
+  // Illuminance: MeasuredValue = 10,000 * log10 (lux+1)
   // Range = 1 lx to 3.576 MLx. Measured Value Range: 1 to 0xfffe
   // So 20 lux range is = 10,000 * log10 (20 + 1) = 13222
   luxReading: {
@@ -78,8 +78,8 @@ var ZCLAttributeInfo = {
     defaultReportableChangeThreshold: 13222,
     defaultReportingMin: 1,
     defaultReportingMax: DEFAULT_MAX_REPORTING
-  }, 
-  // MeasureVal = 10 * V 
+  },
+  // MeasureVal = 10 * V
   // 10 is 1V threshhold
   rmsVoltage: {
     clusterID: Constants.ELECTRICAL_CLUSTER,
@@ -91,13 +91,13 @@ var ZCLAttributeInfo = {
     defaultReportingMax: DEFAULT_MAX_REPORTING
   },
   // MeasureVal = mA
-  // 100 is .1 A threshhold
+  // 10 is 10mA threshhold
   rmsCurrent: {
     clusterID: Constants.ELECTRICAL_CLUSTER,
     attributeID: Constants.RMS_CURRENT_VAL_ATTRIBUTE,
     datatype: Constants.RMS_CURRENT_VAL_TYPE,
     clusterFriendly: 'electricalCluster',
-    defaultReportableChangeThreshold: 100,
+    defaultReportableChangeThreshold: 10,
     defaultReportingMin: 1,
     defaultReportingMax: DEFAULT_MAX_REPORTING
   },

@@ -34,7 +34,7 @@ class ExtendedInfo extends React.Component {
             <div className="header">
             Node EUI:
             </div>
-            0x{item.data.deviceEndpoint.eui64}
+            {item.data.deviceEndpoint.eui64}
           </div>
         </div>
         <div className="item">

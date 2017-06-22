@@ -30,7 +30,7 @@ class RulesEngine {
   }
 
   onZCLAttribute(cluster, attribute, value, sourceEndpoint) {
-    var ruleID = this.createRuleHash(cluster, attribute, sourceEndpoint); 
+    var ruleID = this.createRuleHash(cluster, attribute, sourceEndpoint);
 
     Logger.server.log('info', 'Attribute Rule triggered:', cluster, attribute, value, sourceEndpoint, ruleID);
 
@@ -40,7 +40,7 @@ class RulesEngine {
   }
 
   onZCLCommand(cluster, command, value, sourceEndpoint) {
-    var ruleID = this.createRuleHash(cluster, command, sourceEndpoint); 
+    var ruleID = this.createRuleHash(cluster, command, sourceEndpoint);
 
     Logger.server.log('info', 'Command Rule triggered:', cluster, command, value, sourceEndpoint, ruleID);
 
@@ -52,9 +52,9 @@ class RulesEngine {
   sendRuleCommand(value, ruleType, outDeviceEndpoint) {
     Logger.server.log('info', 'Sending Rule', value, ruleType, outDeviceEndpoint);
 
-    switch (ruleType.type) {
+    switch (ruleType) {
       case 'SIMPLE_BIND':
-        if (value) { 
+        if (value) {
           ServerActions.GatewayInterface.zigbeeLightOn(outDeviceEndpoint);
         } else {
           ServerActions.GatewayInterface.zigbeeLightOff(outDeviceEndpoint);
@@ -65,31 +65,67 @@ class RulesEngine {
     }
   }
 
+  syncNodes(inputNodeWithAttribute, outputNode) {
+    var inputNodeClusterId = inputNodeWithAttribute.clusterId;
+    var outputNodeClusterId = outputNode.clusterId;
+
+    if (parseInt(inputNodeClusterId) === Constants.OCCUPANCY_CLUSTER &&
+        parseInt(outputNodeClusterId) === Constants.ON_OFF_CLUSTER) {
+      if (inputNodeWithAttribute.occupancyReading == 1) {
+        ServerActions.GatewayInterface.zigbeeLightOff(outputNode.deviceEndpoint);
+      } else {
+        ServerActions.GatewayInterface.zigbeeLightOn(outputNode.deviceEndpoint);
+      }
+    } else if (parseInt(inputNodeClusterId) === Constants.IAS_ZONE_CLUSTER &&
+                parseInt(outputNodeClusterId) === Constants.ON_OFF_CLUSTER) {
+      if (inputNodeWithAttribute.contactState == 1) {
+        ServerActions.GatewayInterface.zigbeeLightOff(outputNode.deviceEndpoint);
+      } else {
+        ServerActions.GatewayInterface.zigbeeLightOn(outputNode.deviceEndpoint);
+      }
+    }
+  }
+
   /* Rule information:
     Cluster, Attribute -> Match for which attributes we are tracking
     sourceEndpoint -> Match for source
-    Type -> Identifies which bits to forward and what action to take 
-    destEndpoint -> Where to send command to 
+    Type -> Identifies which bits to forward and what action to take
+    destEndpoint -> Where to send command to
   */
 
-  addRule(cluster, attribute, inDeviceEndpoint, outDeviceEndpoint, ruleType) {
-    var ruleID = this.createRuleHash(cluster, attribute, inDeviceEndpoint); 
+  addRule(attribute, inDeviceInfo, outDeviceInfo, ruleType) {
+    var inDeviceEndpoint = inDeviceInfo.deviceEndpoint;
+    var outDeviceEndpoint = outDeviceInfo.deviceEndpoint;
+    var ruleID = this.createRuleHash(inDeviceInfo.deviceEndpoint.clusterId,
+                                      attribute,
+                                      inDeviceEndpoint);
 
     if (!this.rules[ruleID]) {
       this.rules[ruleID] = [];
     }
 
     this.rules[ruleID].push({ inDeviceEndpoint, outDeviceEndpoint, ruleType });
-    Logger.server.log('info', 'Rule added: ', cluster, attribute, inDeviceEndpoint, ruleType, outDeviceEndpoint, ruleID);
+    Logger.server.log('info',
+                      'Rule added: ',
+                      inDeviceInfo.deviceEndpoint.clusterId,
+                      attribute,
+                      inDeviceEndpoint,
+                      ruleType,
+                      outDeviceEndpoint,
+                      ruleID);
     fs.writeFileSync(rulesStorePath, JSON.stringify(this.rules));
   }
 
-  deleteRule(cluster, attribute, inDeviceEndpoint, outDeviceEndpoint, ruleType) {
-    var ruleID = this.createRuleHash(cluster, attribute, inDeviceEndpoint); 
+  deleteRule(attribute, inDeviceInfo, outDeviceInfo, ruleType) {
+    var inDeviceEndpoint = inDeviceInfo.deviceEndpoint;
+    var outDeviceEndpoint = outDeviceInfo.deviceEndpoint;
+    var ruleID = this.createRuleHash(inDeviceInfo.deviceEndpoint.clusterId,
+                                      attribute,
+                                      inDeviceEndpoint);
 
     _.each(this.rules[ruleID], function(rule) {
       if (_.isEqual(rule, { inDeviceEndpoint, outDeviceEndpoint, ruleType })){
-        delete this.rules[ruleID]; 
+        delete this.rules[ruleID];
       }
     }.bind(this));
     fs.writeFileSync(rulesStorePath, JSON.stringify(this.rules));
@@ -106,9 +142,8 @@ class RulesEngine {
 
   createRuleHash(cluster, attribute, inDeviceEndpoint) {
     var sourceEndpointHash = inDeviceEndpoint.eui64 + '-' + inDeviceEndpoint.endpoint;
-    return cluster + '-' + attribute + '.' + sourceEndpointHash; 
+    return cluster + '-' + attribute + '.' + sourceEndpointHash;
   }
 }
 
 module.exports = RulesEngine;
-

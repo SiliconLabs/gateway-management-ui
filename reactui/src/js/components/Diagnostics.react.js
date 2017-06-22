@@ -17,13 +17,14 @@ class Testing extends React.Component {
       interations: '50',
       deviceTableIndex: -1,
       currentTab: 'gateway',
-      cli: '', 
+      cli: '',
       lights: this._generateLightsList(),
       status: '',
       did: '',
       dtype: '',
       trafficReporting: Flux.stores.store.gatewaysettings.trafficReporting,
       logStreaming: Flux.stores.store.serversettings.logStreaming,
+      cliTerminal: Flux.stores.store.serversettings.cliTerminal,
       displayName: 'Testing',
       testing: Flux.stores.store.serversettings.customerTesting,
     };
@@ -72,7 +73,7 @@ class Testing extends React.Component {
   }
 
   onTest() {
-    if (this.state.deviceTableIndex !== -1 && parseInt(this.state.period) <= 5000 && parseInt(this.state.period) >= 1 
+    if (this.state.deviceTableIndex !== -1 && parseInt(this.state.period) <= 5000 && parseInt(this.state.period) >= 1
       && parseInt(this.state.interations) <= 110 && parseInt(this.state.interations) >= 1) {
         this.setState({ testing: true })
         Flux.actions.testNetwork(this.state.deviceTableIndex, parseInt(this.state.period), parseInt(this.state.interations), this.state.did, this.state.dtype);
@@ -113,7 +114,7 @@ class Testing extends React.Component {
   }
 
   toggleLogging() {
-    if(this.state.trafficReporting){
+    if(this.state.trafficReporting) {
       Flux.actions.setGatewayAttribute('trafficReporting', false);
     } else {
       Flux.actions.setGatewayAttribute('trafficReporting', true);
@@ -122,7 +123,7 @@ class Testing extends React.Component {
   }
 
   toggleStreaming() {
-    if(this.state.logStreaming){
+    if(this.state.logStreaming) {
       Flux.actions.setWebserverAttribute('logStreaming', false);
     } else {
       Flux.actions.setWebserverAttribute('logStreaming', true);
@@ -130,8 +131,25 @@ class Testing extends React.Component {
     this.setState({logStreaming: !this.state.logStreaming});
   }
 
+  toggleCliTernimal() {
+    if(this.state.cliTerminal) {
+      Flux.actions.disableCliTerminal();
+    } else {
+      Flux.actions.enableCliTerminal();
+    }
+    this.setState({cliTerminal: !this.state.cliTerminal});
+  }
+
+  getCliCommandsFilePath(e) {
+    Flux.actions.sendCommandsScriptName(e.target.files[0].name);
+  }
+
+  resetFilePathValue(e) {
+    e.target.value = null;
+  }
+
   _generateLightsList() {
-    var lights = Flux.stores.store.getLights(); 
+    var lights = Flux.stores.store.getLights();
 
     lights =  _.filter(lights, function(group) {
       var deviceType = group.deviceType;
@@ -189,9 +207,9 @@ class Testing extends React.Component {
       log = Flux.stores.store.gatewayLog;
       meta = (
         <div className="ui input" style={{width: '100%'}}>
-          <input type="text" 
-          placeholder="Input CLI Command..." 
-          onKeyDown={this.handleChange.bind(this)} 
+          <input type="text"
+          placeholder="Input CLI Command..."
+          onKeyDown={this.handleChange.bind(this)}
           style={{width: '100%'}}
           />
         </div>
@@ -205,7 +223,7 @@ class Testing extends React.Component {
       <h3 className="title">Diagnostics</h3>
       </div>
       <div className="ui divider"></div>
-          
+
       <h3 className="title">Logs</h3>
       <div className="ui divider"></div>
         {tabmenu}
@@ -218,19 +236,39 @@ class Testing extends React.Component {
       <br/>
       <br/>
       <div className="ui toggle checkbox"
-        onChange={this.toggleStreaming.bind(this)} 
+        onChange={this.toggleStreaming.bind(this)}
       >
-      <input id="streaming" 
-        checked={this.state.logStreaming} 
+      <input id="streaming"
+        checked={this.state.logStreaming}
         disabled={this.state.testing}
         type="checkbox" name="public" />
       <label htmlFor="streaming">Console Log Streaming</label>
+      </div>
+      <br/>
+      <br/>
+      <div className="ui toggle checkbox"
+        onChange={this.toggleCliTernimal.bind(this)}
+      >
+      <input id="cliTerminal"
+        checked={this.state.cliTerminal}
+        type="checkbox" name="public" />
+      <label htmlFor="cliTerminal">Launch CLI Terminal</label>
+      </div>
+
+      <br/>
+      <br/>
+      <div>Select a CLI-commands script:</div>
+      <div>
+        <input name="commandsFile"
+               type="file"
+               onChange={this.getCliCommandsFilePath.bind(this)}
+               onClick={this.resetFilePathValue.bind(this)}/>
       </div>
 
       <div className="ui divider"></div>
 
       <div className="footer">
-        <h5 className="ui right aligned header">{this.state.version}</h5>
+        <h5 className="ui right aligned header">ZigBee Gateway Version: {this.state.version}</h5>
       </div>
       </div>
     );

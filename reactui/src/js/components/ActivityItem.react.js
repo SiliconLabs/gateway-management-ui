@@ -5,6 +5,7 @@ var Slider = require('./Slider.react');
 var ExtendedInfo = require('./ExtendedInfo.react');
 var ExtendedInfoGroup = require('./ExtendedInfoGroup.react');
 var ColorPickerElement = require('./ColorPickerElement.react');
+var DeviceTuple = require('../stores/DeviceConstants').deviceTuple;
 
 
 class ActivityItem extends React.Component {
@@ -37,12 +38,12 @@ class ActivityItem extends React.Component {
       this.setState({ showExtendedInfo: false });
     }
 
-    onLightOn(node) {
-      Flux.actions.setLightOn(node);
+    onDeviceOn(node) {
+      Flux.actions.setDeviceOn(node);
     }
 
-    onLightOff(node) {
-      Flux.actions.setLightOff(node);
+    onDeviceOff(node) {
+      Flux.actions.setDeviceOff(node);
     }
 
     cancelUpdate() {
@@ -76,8 +77,34 @@ class ActivityItem extends React.Component {
       Flux.actions.requestNodeAttribute(node.data.deviceEndpoint, 'occupancyReading');
     }
 
+    getHumanReadableSensorType(deviceType) {
+      var searchResult = '';
+      DeviceTuple.forEach((deviceId) => {
+        if (deviceId[parseInt(deviceType)] !== undefined) {
+          searchResult = deviceId[parseInt(deviceType)];
+        }
+      });
+      if (!searchResult) {
+        searchResult = 'Unknown Type Device';
+      }
+      return searchResult;
+    }
+
+    isClusterSupported(supportedClusterList, clusterId) {
+      var supportedValue = false;
+      supportedClusterList.forEach((cluster) => {
+        if (parseInt(cluster.clusterId) === clusterId &&
+            cluster.clusterType === 'In') {
+          supportedValue = true;
+        }
+      });
+      return supportedValue;
+    }
+
     render() {
       var item = this.props.item;
+      var supportedCluster = item.data.supportedCluster;
+      var humanReadableDeviceType = this.getHumanReadableSensorType(item.data.deviceType);
 
       var extendedLightPanel;
       var basicPanel;
@@ -88,9 +115,11 @@ class ActivityItem extends React.Component {
       if (item.data.otaUpdating) {
         otaupdatemeta = (
           <div className="ui segment control-panel">
-          <h4> Uploading Firmware Version: 0x{item.data.otaTargetFirmwareVersion} </h4>
+          <h4> Uploading Firmware Version: {item.data.otaTargetFirmwareVersion} </h4>
             <div className="ui basic demo progress active" data-percent="100">
-              <div className="bar" style={{WebkitTransitionDuration: '300ms', transitionDuration: '300ms', width: item.data.otaUpdatePercent.toFixed(0)+'%'}}>
+              <div className="bar" style={{WebkitTransitionDuration: '300ms',
+                                            transitionDuration: '300ms',
+                                            width: item.data.otaUpdatePercent.toFixed(0)+'%'}}>
                 <div className="progress" />
               </div>
               <div className="label">{item.data.otaUpdatePercent.toFixed(0)}% Complete</div>
@@ -104,7 +133,7 @@ class ActivityItem extends React.Component {
       } else if (this.state.waiting) {
         otaupdatemeta = (
           <div className="ui segment control-panel">
-            <h4> Please wait.. starting upload or 
+            <h4> Please wait.. starting upload or
             another upload is in progress </h4>
             <div className="ui button basic silabsglobal"
               onTouchTap={this.cancelUpdate.bind(this)}>
@@ -124,17 +153,18 @@ class ActivityItem extends React.Component {
               setLevel = {Flux.actions.setLightLevel}
             />
             <div className="ui button basic silabsglobal"
-              onTouchTap={this.onLightOn.bind(this, item)}>
+              onTouchTap={this.onDeviceOn.bind(this, item)}>
               On
             </div>
             <div className="ui button basic silabsglobal"
-              onTouchTap={this.onLightOff.bind(this, item)}>
+              onTouchTap={this.onDeviceOff.bind(this, item)}>
               Off
             </div>
           </div>
         );
       } else if (Flux.stores.store.isContact(item.data)) {
-        var color = item.data.tamperState === undefined ? '' : item.data.tamperState === 0 ? '' : 'negative';
+        var color = item.data.tamperState === undefined ?
+                    '' : item.data.tamperState === 0 ? '' : 'negative';
 
         basicPanel = (
           <div>
@@ -143,12 +173,8 @@ class ActivityItem extends React.Component {
               item.data.contactState === 0 ? 'Closed' : 'Open'}
             </div>
             <div className={'ui button basic silabsiconbuttons ' + color} >
-              {item.data.tamperState === undefined ? 'Loading..' : 
+              {item.data.tamperState === undefined ? '' :
               item.data.tamperState === 0 ? 'Alarm Enabled' : 'Alarm Triggered'}
-            </div>
-            <div className="ui button basic silabsiconbuttons">
-              {(item.data.temperatureValue === undefined) ? 'Loading..' :
-                item.data.temperatureValue + ' °F'}
             </div>
           </div>
         );
@@ -158,150 +184,26 @@ class ActivityItem extends React.Component {
           <div>
             <div className="ui button basic silabsiconbuttons"
               onTouchTap={this.requestOccupancy.bind(this, item)}>
-              {item.data.occupancyReading === undefined ? 'Loading..' : 
+              {item.data.occupancyReading === undefined ? 'Loading..' :
               item.data.occupancyReading === 1 ? 'Occupied' : 'Not Occupied'}
             </div>
-            <div className="ui button basic silabsiconbuttons"
-              onTouchTap={this.requestTemp.bind(this, item)}>
-              {(item.data.temperatureValue === undefined) ? 'Loading..' :
-                item.data.temperatureValue + ' °F'
-              }
-            </div>
           </div>
         );
-
-        sensorInfo = (
-          <div className="ui segment control-panel">
-            <h4>Occupancy Sensor Information</h4>
-            <div className="ui celled list">
-              <div className="item">
-                  <h5 className="ui left floated header">
-                  Occupancy:
-                  </h5>
-                  <div className="ui right floated">
-                  {item.data.occupancyReading === undefined ? 'Loading..' : 
-                  item.data.occupancyReading === 1 ? 'Occupied' : 'Not Occupied'}
-                  </div>
-              </div>
-              <div className="item">
-                  <h5 className="ui left floated header">
-                  Lux:
-                  </h5>
-                  <div className="ui right floated">
-                  {(item.data.luxReading === undefined) ? 'Loading..' :
-                  item.data.luxReading + ' Lux'}
-                  </div>
-              </div>
-              <div className="item">
-                  <h5 className="ui left floated header">
-                  Relative Humidity: 
-                  </h5>
-                  <div className="ui right floated">
-                  {(item.data.humidityReading === undefined) ? 'Loading..' :
-                  item.data.humidityReading + ' %'}
-                  </div>
-              </div>
-              <div className="item">
-                  <h5 className="ui left floated header">
-                  Temperature:
-                  </h5>
-                  <div className="ui right floated">
-                  {(item.data.temperatureValue === undefined) ? 'Loading..' :
-                  item.data.temperatureValue + ' °F'}
-                  </div>
-              </div>
-            </div>
-          </div>
-        );
-
-      } else if (Flux.stores.store.isTemp(item.data)) {
+      } else if (Flux.stores.store.isMultiSensor(item.data)) {
         basicPanel = (
-          <div className="ui button basic silabsiconbuttons">
-            {(item.data.temperatureValue === undefined) ? 'Waiting..' :
-              item.data.temperatureValue + ' °F'}
+          <div>
           </div>
         );
 
       } else if (Flux.stores.store.isSmartPlug(item.data)) {
-        sensorInfo = (
-          <div className="ui segment control-panel">
-            <h4>Device Sensor Data</h4>
-            <div className="ui celled list">
-              <div className="item">
-                  <h5 className="ui left floated header">
-                  Power Used: 
-                  </h5>
-                  <div className="ui right floated">
-                  {(item.data.powersumValue === undefined) ? 'Loading..' :
-                  item.data.powersumValue + ' kWh'}
-                  </div>
-              </div>
-              <div className="item">
-                  <h5 className="ui left floated header">
-                  Lux:
-                  </h5>
-                  <div className="ui right floated">
-                  {(item.data.luxReading === undefined) ? 'Loading..' :
-                  item.data.luxReading + ' Lux'}
-                  </div>
-              </div>
-              <div className="item">
-                  <h5 className="ui left floated header">
-                  Relative Humidity: 
-                  </h5>
-                  <div className="ui right floated">
-                  {(item.data.humidityReading === undefined) ? 'Loading..' :
-                  item.data.humidityReading + ' %'}
-                  </div>
-              </div>
-              <div className="item">
-                  <h5 className="ui left floated header">
-                  Temperature:
-                  </h5>
-                  <div className="ui right floated">
-                  {(item.data.temperatureValue === undefined) ? 'Loading..' :
-                  item.data.temperatureValue + ' °F'}
-                  </div>
-              </div>
-              <div className="item">
-                  <h5 className="ui left floated header">
-                  RMS Voltage:
-                  </h5>
-                  <div className="ui right floated">
-                  {(item.data.temperatureValue === undefined) ? 'Loading..' :
-                  item.data.rmsVoltage + ' V'}
-                  </div>
-              </div>
-              <div className="item">
-                  <h5 className="ui left floated header">
-                  RMS Current:
-                  </h5>
-                  <div className="ui right floated">
-                  {(item.data.temperatureValue === undefined) ? 'Loading..' :
-                  item.data.rmsCurrent + ' mA'}
-                  </div>
-              </div>
-              <div className="item">
-                  <h5 className="ui left floated header">
-                  Active Power:
-                  </h5>
-                  <div className="ui right floated">
-                  {(item.data.temperatureValue === undefined) ? 'Loading..' :
-                  item.data.activePower + ' W'}
-                  </div>
-              </div>
-            </div>
-          </div>
-        );
-
         basicPanel = (
           <div>
             <div className="ui button basic silabsglobal"
-              onTouchTap={this.onLightOn.bind(this, item)}>
+              onTouchTap={this.onDeviceOn.bind(this, item)}>
               On
             </div>
             <div className="ui button basic silabsglobal"
-              onTouchTap={this.onLightOff.bind(this, item)}>
+              onTouchTap={this.onDeviceOff.bind(this, item)}>
               Off
             </div>
           </div>
@@ -315,11 +217,11 @@ class ActivityItem extends React.Component {
               setLevel = {Flux.actions.setLightLevel}
             />
             <div className="ui button basic silabsglobal"
-              onTouchTap={Flux.actions.setLightOn.bind(this, item)}>
+              onTouchTap={Flux.actions.setDeviceOn.bind(this, item)}>
               On
             </div>
             <div className="ui button basic silabsglobal"
-              onTouchTap={Flux.actions.setLightOff.bind(this, item)}>
+              onTouchTap={Flux.actions.setDeviceOff.bind(this, item)}>
               Off
             </div>
           </div>
@@ -338,7 +240,7 @@ class ActivityItem extends React.Component {
               </div>
             </div>
         );
-      } else if (parseInt(item.data.deviceType) === Constants.DEVICE_ID_EXTENDED_COLOR_LIGHT 
+      } else if (parseInt(item.data.deviceType) === Constants.DEVICE_ID_EXTENDED_COLOR_LIGHT
       || parseInt(item.data.deviceType) === Constants.DEVICE_ID_COLOR_DIMMABLE_LIGHT) {
         extendedLightPanel = (
               <div className="center aligned column">
@@ -373,12 +275,110 @@ class ActivityItem extends React.Component {
         );
       }
 
+      sensorInfo = (
+          <div className="ui segment control-panel">
+            <h4>{humanReadableDeviceType} Information</h4>
+            {supportedCluster.length > 0 &&
+              <div className="ui celled list">
+                {this.isClusterSupported(supportedCluster, Constants.OCCUPANCY_CLUSTER) &&
+                  <div className="item">
+                      <h5 className="ui left floated header">
+                      Occupancy:
+                      </h5>
+                      <div className="ui right floated">
+                      {item.data.occupancyReading === undefined ? 'Loading..' :
+                      item.data.occupancyReading === 1 ? 'Occupied' : 'Not Occupied'}
+                      </div>
+                  </div>
+                }
+                {this.isClusterSupported(supportedCluster, Constants.ILLUMINANCE_CLUSTER) &&
+                  <div className="item">
+                      <h5 className="ui left floated header">
+                      Lux:
+                      </h5>
+                      <div className="ui right floated">
+                      {(item.data.luxReading === undefined) ? 'Loading..' :
+                      item.data.luxReading + ' Lux'}
+                      </div>
+                  </div>
+                }
+                {this.isClusterSupported(supportedCluster, Constants.HUMIDITY_CLUSTER) &&
+                  <div className="item">
+                      <h5 className="ui left floated header">
+                      Relative Humidity:
+                      </h5>
+                      <div className="ui right floated">
+                      {(item.data.humidityReading === undefined) ? 'Loading..' :
+                      item.data.humidityReading + ' %'}
+                      </div>
+                  </div>
+                }
+                {this.isClusterSupported(supportedCluster, Constants.TEMPERATURE_CLUSTER) &&
+                  <div className="item">
+                      <h5 className="ui left floated header">
+                      Temperature:
+                      </h5>
+                      <div className="ui right floated">
+                      {(item.data.temperatureValue === undefined) ? 'Loading..' :
+                      item.data.temperatureValue + ' °F'}
+                      </div>
+                  </div>
+                }
+                {this.isClusterSupported(supportedCluster, Constants.SIMPLE_METERING_CLUSTER) &&
+                  <div className="item">
+                      <h5 className="ui left floated header">
+                      Power Used:
+                      </h5>
+                      <div className="ui right floated">
+                      {(item.data.powersumValue === undefined) ? 'Loading..' :
+                      item.data.powersumValue + ' kWh'}
+                      </div>
+                  </div>
+                }
+                {this.isClusterSupported(supportedCluster, Constants.ELECTRICAL_CLUSTER) &&
+                  <div className="item">
+                      <h5 className="ui left floated header">
+                      RMS Voltage:
+                      </h5>
+                      <div className="ui right floated">
+                      {(item.data.rmsVoltage === undefined) ? 'Loading..' :
+                      item.data.rmsVoltage + ' V'}
+                      </div>
+                  </div>
+                }
+                {this.isClusterSupported(supportedCluster, Constants.ELECTRICAL_CLUSTER) &&
+                  <div className="item">
+                      <h5 className="ui left floated header">
+                      RMS Current:
+                      </h5>
+                      <div className="ui right floated">
+                      {(item.data.rmsCurrent === undefined) ? 'Loading..' :
+                      item.data.rmsCurrent + ' mA'}
+                      </div>
+                  </div>
+                }
+                {this.isClusterSupported(supportedCluster, Constants.ELECTRICAL_CLUSTER) &&
+                  <div className="item">
+                      <h5 className="ui left floated header">
+                      Active Power:
+                      </h5>
+                      <div className="ui right floated">
+                      {(item.data.activePower === undefined) ? 'Loading..' :
+                      item.data.activePower + ' W'}
+                      </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+      );
+
       var matches = 0;
       var otaList = _.map(Flux.stores.store.getOTAList(), function(otaitem) {
         // Check if item fields are defined
-        if (item.data.imageTypeId !== undefined && item.data.firmwareVersion !== undefined && 
+        if (item.data.imageTypeId !== undefined && item.data.firmwareVersion !== undefined &&
           item.data.imageTypeId !== null && item.data.firmwareVersion !== null) {
-          if (parseInt(otaitem.imageTypeId, 16) === parseInt(item.data.imageTypeId, 16) 
+          if (parseInt(otaitem.imageTypeId, 16) === parseInt(item.data.imageTypeId, 16)
             && parseInt(otaitem.firmwareVersion, 16) !== parseInt(item.data.firmwareVersion, 16)) {
             matches++;
             return (
@@ -441,7 +441,7 @@ class ActivityItem extends React.Component {
         <div className="column">
             <div className="center aligned column">
               <div className="ui form segment">
-                  <img className="ui centered tiny image" 
+                  <img className="ui centered tiny image"
                     src={item.image} />
                   <div className="content">
                     <h4>{item.name}</h4>

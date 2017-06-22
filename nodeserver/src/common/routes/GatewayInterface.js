@@ -2,15 +2,16 @@
 
 /* This file implements the Silicon Labs Smart Gateway MQTT API */
 
-var mqtt           = require('mqtt'),
-  ip               = require('ip'),
-  fs               = require('fs'),
-  MQTTEmitter      = require('mqtt-emitter'),
-  DeviceController = require('../controller/DeviceController.js'),
-  Constants        = require('../Constants.js'),
-  Config           = require('../Config.js'),
-  _                = require('underscore'), 
-  Logger           = require('../Logger.js');
+var mqtt                = require('mqtt'),
+  ip                    = require('ip'),
+  fs                    = require('fs'),
+  MQTTEmitter           = require('mqtt-emitter'),
+  DeviceController      = require('../controller/DeviceController.js'),
+  DeviceDBManagement    = require('../controller/DeviceDBManagement.js'),
+  Constants             = require('../Constants.js'),
+  Config                = require('../Config.js'),
+  _                     = require('underscore'),
+  Logger                = require('../Logger.js');
 
 // The MQTT Mosquitto broker is running on localhost:1883
 // ip.address() is the local address.
@@ -52,7 +53,7 @@ mqttClient.on('connect', function() {
   Logger.server.log('info', 'MQTT Client connected to broker at: ' + mqttBrokerAddress
   + ':' + mqttBrokerPort);
 
-  mqttClient.subscribe({'#': 2}, function(err) { 
+  mqttClient.subscribe({'#': 2}, function(err) {
     if (!err) {
       Logger.server.log('info', 'MQTT Client Subscribed to #');
     } else {
@@ -69,27 +70,27 @@ mqttClient.on('error', function() {
 var events = new MQTTEmitter();
 
 mqttClient.on('message', function(topic, message) {
-    Logger.server.log('info', 'MQTT Received (topic): ' + topic); 
-    Logger.server.log('info', 'MQTT Received (message): ' + message); 
+    Logger.server.log('info', 'MQTT Received (topic): ' + topic);
+    Logger.server.log('info', 'MQTT Received (message): ' + message);
 
   try {
     var messageParsed = JSON.parse(message);
 
     events.emit(topic, messageParsed);
   } catch (e) {
-    Logger.server.log('info', 'Error Parsing MQTT Received: ' + e + ' \ntopic: ' 
+    Logger.server.log('info', 'Error Parsing MQTT Received: ' + e + ' \ntopic: '
       + topic + ' message: ' + message);
   }
 });
 
 /*
-  MQTT is the primary channel for communication with the Silicon Labs 
-  Raspberry Pi Gateway. These events are triggered when the gateway sends 
-  information to this server inteface. IE: Gateway --> Server. 
+  MQTT is the primary channel for communication with the Silicon Labs
+  Raspberry Pi Gateway. These events are triggered when the gateway sends
+  information to this server inteface. IE: Gateway --> Server.
   These routes send gateway data to the cloud and/or to a browser/client.
 */
 
-/* 
+/*
 this event is fired when a node joins the gateway
 mqtt message format:
   {
@@ -99,26 +100,36 @@ mqtt message format:
   "timeSinceLastMessage":581,
   "deviceEndpoint":{
     "eui64":"000B57FFFE1938FD",
-    "endpoint":1
+    "endpoint":1,
+    "clusterInfo": [
+      {
+          "clusterId": <String>,
+          "clusterType": <String>
+      },
+      {
+          "clusterId": <String>,
+          "clusterType": <String>
+      }
+    ]
   }
 },
 */
 events.on('gw/+gatewayEui/devicejoined', function(messageParsed, params) {
-  DeviceController.onNodeJoin(messageParsed, params.gatewayEui, true);
+  DeviceDBManagement.onNodeJoin(messageParsed, params.gatewayEui, true);
 });
 
-/* 
-This event is fired when a node leaves 
+/*
+This event is fired when a node leaves
 mqtt message format:
   {
     nodeEui: "nodeEuiString",
   }
 */
 events.on('gw/+gatewayEui/deviceleft', function(messageParsed) {
-  DeviceController.onNodeLeft(messageParsed.eui64);
+  DeviceDBManagement.onNodeLeft(messageParsed.eui64);
 });
 
-/* 
+/*
 This event is fired when a client requests the list of all devices
 mqtt message format:
 {
@@ -130,7 +141,17 @@ mqtt message format:
     "timeSinceLastMessage":581,
     "deviceEndpoint":{
       "eui64":"000B57FFFE1938FD",
-      "endpoint":1
+      "endpoint":1,
+      "clusterInfo": [
+        {
+            "clusterId": <String>,
+            "clusterType": <String>
+        },
+        {
+            "clusterId": <String>,
+            "clusterType": <String>
+        }
+      ]
       }
     },
     {
@@ -140,19 +161,29 @@ mqtt message format:
     "timeSinceLastMessage":192,
     "deviceEndpoint":{
       "eui64":"000D6F000AEF245F",
-      "endpoint":1
+      "endpoint":1,
+      "clusterInfo": [
+        {
+            "clusterId": <String>,
+            "clusterType": <String>
+        },
+        {
+            "clusterId": <String>,
+            "clusterType": <String>
+        }
+      ]
       }
     }
   ]
 }
 */
 events.on('gw/+gatewayEui/devices', function(messageParsed, params) {
-  DeviceController.onDeviceListReceived(messageParsed, params.gatewayEui);
+  DeviceDBManagement.onDeviceListReceived(messageParsed, params.gatewayEui);
 });
 
-/* 
+/*
 This event is fired when the server sends the ruleslist
-mqtt message format: 
+mqtt message format:
 {
   "relays":[
     {
@@ -169,11 +200,11 @@ events.on('gw/+gatewayEui/relays', function(messageParsed) {
   DeviceController.onRelayList(messageParsed);
 });
 
-/* 
+/*
 This event is fired when the server sends state of network.
-mqtt message format: 
+mqtt message format:
 {
-  networkUp: true, false, 
+  networkUp: true, false,
   networkPanId: "panIDString",
   radioTxPower: <power>,
   radioChannel: <channel>,
@@ -185,7 +216,7 @@ events.on('gw/+gatewayEui/settings', function(messageParsed) {
 });
 
 /* This event is fired when a device sends a new attribute
-mqtt message format: 
+mqtt message format:
 {
   "clusterId":"0x0019",
   "commandId":"0x01",
@@ -202,26 +233,26 @@ events.on('gw/+gatewayEui/zclresponse', function(messageParsed) {
 });
 
 /* This event is fired when a node changes state (Joined, Unresponsive, etc)
-mqtt message format: 
-{ 
+mqtt message format:
+{
   nodeId: "nodeIDString",
   nodeEui: "nodeEuiString",
   deviceState: <deviceStateInt>,
 }
 */
 events.on('gw/+gatewayEui/devicestatechange', function(messageParsed) {
-  DeviceController.onNodeStateChange(messageParsed);
+  DeviceDBManagement.onNodeStateChange(messageParsed);
 });
 
-/* This event is fired when the gateway reports OTA activity 
+/* This event is fired when the gateway reports OTA activity
 ota message types (otaTypeString):
   otaFinished
   otaBlockSent
   otaStarted
   otaFailed
 
-MQTT message format: 
-{ 
+MQTT message format:
+{
   messageType: "<otaTypeString>",
   nodeId: "nodeIDString",
   nodeEui: "nodeEuiString",
@@ -234,11 +265,11 @@ MQTT message format:
 }
 */
 events.on('gw/+gatewayEui/otaevent', function(messageParsed) {
-  DeviceController.onOtaEvent(messageParsed); 
+  DeviceController.onOtaEvent(messageParsed);
 });
 
 /* This event is periodically fired by the gateway to show network status
-MQTT message format: 
+MQTT message format:
 {
   networkUp: true, false
   networkPanId: "panIDString",
@@ -247,11 +278,11 @@ MQTT message format:
 }
 */
 events.on('gw/+gatewayEui/heartbeat', function(messageParsed, params) {
-  DeviceController.onHeartbeat(messageParsed, params.gatewayEui); 
+  DeviceController.onHeartbeat(messageParsed, params.gatewayEui);
 });
 
 /* This event is acknowledges commands were executed
-MQTT message format: 
+MQTT message format:
 
 {
   command: "<cli>",
