@@ -20,7 +20,7 @@ if (Config.CLOUD_ENABLED && Config.CLOUD_SOCKETS_SSL_ENABLED) {
   try {
     var socketsKey = fs.readFileSync(Constants.SOCKETS_PRIVKEY_FILELOCATION);
     var socketsCert = fs.readFileSync(Constants.SOCKETS_CERT_FILELOCATION);
-    var options = { 
+    var options = {
         key: socketsKey,
         cert: socketsCert
     };
@@ -36,16 +36,16 @@ if (Config.CLOUD_ENABLED && Config.CLOUD_SOCKETS_SSL_ENABLED) {
   io.listen(socketIOPort);
 }
 
-Logger.server.log('info', 'SocketIO Listening on: ' 
+Logger.server.log('info', 'SocketIO Listening on: '
   + ip.address() + ':' + socketIOPort);
 
 /* This socket server listens for client/browser requests */
 io.on('connection', function(socket) {
-  Logger.server.log('info', 'New SocketIO Client Connected. Current Number: ' 
-    + io.engine.clientsCount); 
+  Logger.server.log('info', 'New SocketIO Client Connected. Current Number: '
+    + io.engine.clientsCount);
 
-  /* This event is called when a client sends a predefined action to the gateway 
-    action payloads: {type: type, params ... } 
+  /* This event is called when a client sends a predefined action to the gateway
+    action payloads: {type: type, params ... }
       {"type":"permitjoinms", delayMs}
       {"type":"permitjoinoff"}
       {"type":"addrule", inDeviceTableIndex, outDeviceTableIndex}
@@ -56,6 +56,8 @@ io.on('connection', function(socket) {
       {"type":"lighttoggle", deviceEndpoint}
       {"type":"lightoff", deviceEndpoint}
       {"type":"lighton", deviceEndpoint}
+      {"type":"enterIdentify", deviceEndpoint}
+      {"type":"exitIdentify", deviceEndpoint}
       {"type":"setlightlevel", deviceEndpoint, level}
       {"type":"setlightcolortemp", deviceEndpoint, colorTemp}
       {"type":"setlighthuesat", deviceEndpoint, hue, sat}
@@ -66,7 +68,7 @@ io.on('connection', function(socket) {
       {"type":"otaupgradenotify", nodeId, manufacturerId, imageTypeId, firmwareVersion}
       {"type":"requestgatewaystate"}
       {"type":"setgatewayattribute", attribute, value}
-  */  
+  */
   socket.on('action', function(data) {
     Logger.server.log('info', 'Socket.io Received (action): ' + JSON.stringify(data));
 
@@ -97,7 +99,7 @@ io.on('connection', function(socket) {
   });
 
   /* This event is called when a client sends a webserver message
-    servermessage payloads: {type: type, params ... } 
+    servermessage payloads: {type: type, params ... }
     {"type":"getotafiles"}
     {"type":"otacopyfile", otaFilename}
     {"type":"otaclear"}
@@ -123,8 +125,8 @@ io.on('connection', function(socket) {
   });
 
   socket.on('disconnect', function() {
-    Logger.server.log('info', 'SocketIO Client Disconnected. Current Number: ' 
-      + io.engine.clientsCount); 
+    Logger.server.log('info', 'SocketIO Client Disconnected. Current Number: '
+      + io.engine.clientsCount);
   });
 });
 
@@ -135,9 +137,9 @@ Date.prototype.yyyymmddhhmmssfff = function() {
   var hh = this.getHours() < 10 ? '0' + this.getHours() : this.getHours();
   var min = this.getMinutes() < 10 ? '0' + this.getMinutes() : this.getMinutes();
   var ss = this.getSeconds() < 10 ? '0' + this.getSeconds() : this.getSeconds();
-  var fff = this.getMilliseconds() < 10 ? '00' + this.getMilliseconds() : 
+  var fff = this.getMilliseconds() < 10 ? '00' + this.getMilliseconds() :
   this.getMilliseconds() >= 10 && this.getMilliseconds() < 100 ? '0' + this.getMilliseconds() : this.getMilliseconds();
-  return yyyy + '/' + mm + '/' + dd + ' ' + hh + ':' + min + ':' + ss + '.' + fff;  
+  return yyyy + '/' + mm + '/' + dd + ' ' + hh + ':' + min + ':' + ss + '.' + fff;
 };
 
 /* Set up socketIO streaming to alert clients of server messages */
@@ -149,11 +151,11 @@ var SocketIOLoggerServer = winston.transports.SocketIOLoggerServer = function(op
 };
 
 util.inherits(SocketIOLoggerServer, winston.Transport);
- 
+
 SocketIOLoggerServer.prototype.log = function(level, msg, meta, callback) {
   var d = new Date();
-  if (Logger.logStreaming && 
-    !DeviceController.gatewaySettings.trafficReporting && 
+  if (Logger.logStreaming &&
+    !DeviceController.gatewaySettings.trafficReporting &&
     !DeviceController.serverSettings.otaInProgress) {
       io.sockets.emit('serverlogstream', d.yyyymmddhhmmssfff() + ' ' + msg + '\n\r');
   }

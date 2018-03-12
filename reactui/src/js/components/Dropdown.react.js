@@ -7,7 +7,7 @@ var React = require('react');
 var ReactDOM = require('react-dom');
 
 class Dropdown extends React.Component {
-	
+
 	constructor(props) {
     super(props);
     this.state = {
@@ -30,7 +30,7 @@ class Dropdown extends React.Component {
 	render() {
 		var items = _.map(this.props.options, function(item, index) {
 			return (
-				<div className="item"
+				<div className="item" key={item.name}
 					onTouchTap={this.onSelect.bind(this, item.value)}>{item.simplename}</div>
 			);
 		}, this);

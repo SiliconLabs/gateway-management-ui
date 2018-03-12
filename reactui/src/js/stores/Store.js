@@ -1,5 +1,6 @@
 var Constants = require('../Constants');
 var Fluxxor = require('fluxxor');
+var CircularBuffer = require('circular-buffer');
 var lights = require('./DeviceConstants').lights;
 var switches = require('./DeviceConstants').switches;
 var sensors = require('./DeviceConstants').sensors;
@@ -23,16 +24,28 @@ var Store = Fluxxor.createStore({
     this.tests = [];
     this.rules = [];
     this.cloudRules = [];
-    this.otafiles = {};
+    this.otafiles = [];
     this.ip = '';
     this.serversettings = '';
     this.gatewaysettings = '';
     this.heartbeat = '';
-    this.testing = false;
     this.groupsnum = 0;
     this.buildinfo = '';
-    this.networkSecurityLevel = 'Z3';
+    this.identifyModeEntry = {};
     this.installCodeFromServer = '';
+    this.testing = false;
+    this.networkSecurityLevel = 'Z3';
+    this.addingDeviceProgress = 0;
+    this.addingDevice = false;
+    this.addingDeviceTimer = 0;
+    this.addingDeviceTimerExpired = false;
+    this.otaWaitingTimer = 0;
+    this.isOtaInProgress = {
+      status: false,
+      policy: '',
+      item: {}
+    };
+    this.cmdHistory = new CircularBuffer(Constants.COMMAND_HISTORY_LENGTH);
 
     /* Uncomment this line to add mock devices for UI validaiton */
     //this.testJoinColorControlLight();
@@ -54,6 +67,7 @@ var Store = Fluxxor.createStore({
       Constants.DEVICE_UPDATE, this.onDeviceUpdate,
       Constants.SERVER_SETTINGS, this.onServerSettings,
       Constants.GATEWAY_SETTINGS, this.onGatewaySettings,
+      Constants.OTA_EVENTS, this.onOtaEventUpdate,
       Constants.OTA_AVAILABLE_FILES, this.otaFilesReceived,
       Constants.SERVER_LOG, this.loadServerLog,
       Constants.GATEWAY_LOG, this.loadGatewayLog,
@@ -89,6 +103,12 @@ var Store = Fluxxor.createStore({
         device.gatewayEui = this.gatewayEui;
         this.removeNodeInfoInLists(device);
         this.pushNodeInfoToNodeLists(device);
+
+        if (this.isIdentifyServerClusterDetected(device)) {
+          device.isIdentifyServerClusterDetected = true;
+        } else {
+          device.isIdentifyServerClusterDetected = false;
+        }
 
         if (!device.hasOwnProperty('otaUpdating')) {
           device.otaUpdating = false;
@@ -141,6 +161,7 @@ var Store = Fluxxor.createStore({
       //If device is in list
       if ((deviceInList.deviceEndpoint.eui64 === messageParsed.deviceEndpoint.eui64) &&
          (deviceInList.deviceEndpoint.endpoint === messageParsed.deviceEndpoint.endpoint)) {
+        messageParsed.isIdentifyServerClusterDetected = deviceInList.isIdentifyServerClusterDetected;
         deviceInList = messageParsed;
         return deviceInList;
       } else {
@@ -191,6 +212,18 @@ var Store = Fluxxor.createStore({
 
   onGatewaySettings: function(messageParsed) {
     this.gatewaysettings = messageParsed;
+    this.emit('change');
+  },
+
+  onOtaEventUpdate: function(otaEvent) {
+    if (otaEvent.messageType &&
+       (otaEvent.messageType === 'otaFinished' ||
+        otaEvent.messageType === 'otaFailed')) {
+      this.resetOtaProgress();
+    } else if (otaEvent.messageType &&
+               otaEvent.messageType === 'otaBlockSent') {
+      this.stopOtaWaitingCountdown();
+    }
     this.emit('change');
   },
 
@@ -265,6 +298,64 @@ var Store = Fluxxor.createStore({
     }
   },
 
+  startOtaWaitingCountdown: function() {
+    if (this.otaWaitingTimer === 0) {
+      this.otaWaitingTimer = setTimeout(() => {
+        this.resetOtaProgress();
+        this.otaWaitingTimer = 0;
+        this.triggerDelayedRender();
+      }, Constants.OTA_WAITING_TIMEOUT);
+    }
+  },
+
+  stopOtaWaitingCountdown: function() {
+    clearTimeout(this.otaWaitingTimer);
+    this.otaWaitingTimer = 0;
+  },
+
+  setAddingDeviceStatus: function(addingDevice, addingDeviceProgress) {
+    this.addingDevice = addingDevice;
+    this.addingDeviceProgress = addingDeviceProgress;
+
+    if (this.addingDeviceTimer === 0 &&
+        addingDevice === true &&
+        addingDeviceProgress > 0) {
+      this.addingDeviceTimer = setInterval(this.addingDeviceTimerCountDown.bind(this),
+                                           1000);
+    }
+  },
+
+  loadAddingDeviceStatus: function() {
+    var addingDeviceStatus = {};
+
+    addingDeviceStatus['addingDevice'] = this.addingDevice;
+    addingDeviceStatus['addingDeviceProgress'] = this.addingDeviceProgress;
+    clearInterval(this.addingDeviceTimer);
+    this.addingDeviceTimer = 0;
+    return addingDeviceStatus;
+  },
+
+  addingDeviceTimerCountDown: function() {
+    var timeLeft = this.addingDeviceProgress - 1;
+    this.addingDeviceProgress = timeLeft;
+
+    if (timeLeft <= 0) {
+      clearInterval(this.addingDeviceTimer);
+      this.addingDeviceTimer = 0;
+      this.addingDevice = false;
+      this.addingDeviceTimerExpired = true;
+    }
+  },
+
+  closeAddingDeviceIfExpired: function() {
+    if (this.addingDeviceTimerExpired === true) {
+      this.addingDeviceTimerExpired = false;
+      return true;
+    } else {
+      return false;
+    }
+  },
+
   otaFilesReceived: function(otafiles) {
     this.otafiles = otafiles;
     this.emit('change');
@@ -310,6 +401,20 @@ var Store = Fluxxor.createStore({
 
   getNetworkSecurityLevel:function() {
     return this.networkSecurityLevel;
+  },
+
+  getOtaProgress: function() {
+    return this.isOtaInProgress;
+  },
+
+  setOtaProgress: function(status, policy, item) {
+    this.isOtaInProgress.status = status;
+    this.isOtaInProgress.policy = policy;
+    this.isOtaInProgress.item = item;
+  },
+
+  resetOtaProgress: function() {
+    this.setOtaProgress(false, '', {});
   },
 
   setNetworkSecurityLevel:function(securityLevel) {
@@ -442,6 +547,12 @@ var Store = Fluxxor.createStore({
     this.emit('change');
   },
 
+  triggerDelayedRender(delayMs) {
+    setTimeout(() => {
+      this.emit('change');
+    }, delayMs);
+  },
+
   filterRulesListForDeletion: function(inputNode, outputNode) {
     var rules = this.rules;
     var cloudRules = this.cloudRules;
@@ -518,6 +629,25 @@ var Store = Fluxxor.createStore({
       }
     });
     return rulesList;
+  },
+
+  setIdentifyModeStatus: function(status, node) {
+    var hash = node.data.hash;
+
+    this.identifyModeEntry[hash] = status;
+  },
+
+  getIdentifyModeStatus: function(node) {
+    var hash = node.data.hash;
+    var keyFound = _.findKey(this.identifyModeEntry, function(value, key) {
+      return key.indexOf(hash) >= 0;
+    });
+
+    if (keyFound !== undefined) {
+      return this.identifyModeEntry[hash];
+    } else {
+      return false;
+    }
   },
 
   getHumanReadableDevice: function(device) {
@@ -619,22 +749,12 @@ var Store = Fluxxor.createStore({
     }.bind(this));
   },
 
-  syncNodesOnRuleCreation: function(inputNode, outputNode) {
-    var inputNodeWithAttribute = inputNode;
-    var outputNodeWithAttribute = outputNode;
-    var inputNodeClusterId = inputNode.deviceEndpoint.clusterId;
-    var device = this.getDeviceByEuiAndEndpoint(inputNode.deviceEndpoint.eui64,
-                                                inputNode.deviceEndpoint.endpoint);
+  getCmdHistory: function() {
+    return this.cmdHistory;
+  },
 
-    if (parseInt(inputNodeClusterId) === Constants.OCCUPANCY_CLUSTER &&
-        parseInt(outputNodeClusterId) === Constants.ON_OFF_CLUSTER) {
-      inputNodeWithAttribute.occupancyReading = device.occupancyReading;
-      Flux.actions.syncNodesOnRuleCreation(inputNodeWithAttribute, outputNode);
-    } else if (parseInt(inputNodeClusterId) === Constants.IAS_ZONE_CLUSTER &&
-                parseInt(outputNodeClusterId) === Constants.ON_OFF_CLUSTER) {
-      inputNodeWithAttribute.contactState = device.contactState;
-      Flux.actions.syncNodesOnRuleCreation(inputNodeWithAttribute, outputNode);
-    }
+  insertCmdHistory: function(command) {
+    this.cmdHistory.enq(command);
   },
 
   isLight: function(device) {
@@ -665,6 +785,19 @@ var Store = Fluxxor.createStore({
   isOccupancy: function(device) {
     var deviceType = parseInt(device.deviceType);
     return sensors[deviceType] === 'Occupancy Sensor';
+  },
+
+  isIdentifyServerClusterDetected: function(device) {
+    var clusterDetected = false;
+    var clusterInfo = device.deviceEndpoint.clusterInfo;
+
+    clusterInfo.forEach((clusterValue) => {
+      if (parseInt(clusterValue.clusterId) === Constants.IDNETIFY_CLUSTER &&
+          clusterValue.clusterType === "In") {
+        clusterDetected = true;
+      }
+    });
+    return clusterDetected;
   },
 
   isDeviceEndpointIdentical: function(deviceEndpoint0, deviceEndpoint1) {

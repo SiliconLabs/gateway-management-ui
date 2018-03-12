@@ -1,4 +1,4 @@
-var Constants = require('./Constants.js');
+var Constants = require('../Constants.js');
 
 // Attributes object for reading.
 var ZCLAttributeNames = {};

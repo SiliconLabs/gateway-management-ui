@@ -38,6 +38,18 @@ class ActivityItem extends React.Component {
       this.setState({ showExtendedInfo: false });
     }
 
+    onEnterIdentify(node) {
+      Flux.actions.enterIdentify(node);
+      Flux.stores.store.setIdentifyModeStatus(true, node);
+      Flux.stores.store.triggerDelayedRender(0);
+    }
+
+    onExitIdentify(node) {
+      Flux.actions.exitIdentify(node);
+      Flux.stores.store.setIdentifyModeStatus(false, node);
+      Flux.stores.store.triggerDelayedRender(0);
+    }
+
     onDeviceOn(node) {
       Flux.actions.setDeviceOn(node);
     }
@@ -46,27 +58,28 @@ class ActivityItem extends React.Component {
       Flux.actions.setDeviceOff(node);
     }
 
-    cancelUpdate() {
+    onCancelOta() {
       Flux.actions.otaClearDirectory();
-      this.setState({ waiting: false });
+      Flux.stores.store.resetOtaProgress();
+      Flux.stores.store.stopOtaWaitingCountdown();
+      Flux.stores.store.triggerDelayedRender(0);
     }
 
-    copyImage(otaitem, item) {
-      Flux.actions.setWebserverAttribute('logStreaming', false);
-      Flux.actions.otaCopyFile(otaitem);
+    onTriggerOta(otaitem, item) {
+      var recvOtaProgress = Flux.stores.store.getOtaProgress();
+      if (recvOtaProgress && recvOtaProgress.status) return;
 
+      Flux.actions.otaCopyFile(otaitem);
       if (parseInt(otaitem.firmwareVersion, 16) > parseInt(item.data.firmwareVersion, 16)) {
         Flux.actions.gatewayUpgradePolicy(true);
+        Flux.stores.store.setOtaProgress(true, 'Upgrading', item);
       } else if (parseInt(otaitem.firmwareVersion, 16) < parseInt(item.data.firmwareVersion, 16)) {
         Flux.actions.gatewayUpgradePolicy(false);
+        Flux.stores.store.setOtaProgress(true, 'Downgrading', item);
       }
-
       Flux.actions.gatewayNotify(otaitem, item);
-
-      this.setState({ waiting: true });
-      window.setTimeout(function() {
-        this.setState({ waiting: false });
-      }.bind(this), Constants.OTA_WAITING_TIMEOUT);
+      Flux.stores.store.startOtaWaitingCountdown();
+      Flux.stores.store.triggerDelayedRender(0);
     }
 
     requestTemp(node) {
@@ -101,49 +114,50 @@ class ActivityItem extends React.Component {
       return supportedValue;
     }
 
+    checkOtaProgressItemMatch(otaProgress, item) {
+      if (!otaProgress.status) return false;
+      var otaProgressItem = otaProgress.item;
+      if (item.data.deviceEndpoint.eui64 === otaProgressItem.data.deviceEndpoint.eui64) {
+        return true;
+      } else {
+        return false;
+      }
+    }
+
+    isDeviceItemMatchOtaFileInfo(otaitem, item) {
+      if (item.data.imageTypeId !== undefined && item.data.firmwareVersion !== undefined &&
+          item.data.manufacturerId !== undefined &&
+          item.data.imageTypeId !== null && item.data.firmwareVersion !== null &&
+          item.data.manufacturerId !== null ) {
+        if (parseInt(otaitem.imageTypeId, 16) === parseInt(item.data.imageTypeId, 16) &&
+            parseInt(otaitem.firmwareVersion, 16) !== parseInt(item.data.firmwareVersion, 16) &&
+            parseInt(otaitem.manufacturerId, 16) === parseInt(item.data.manufacturerId, 16)) {
+          return true;
+        } else {
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
+
+    isDeviceItemMatchOtaFilesList(otaFilesList, item) {
+      return _.find(otaFilesList, function(otaitem) {
+        if (this.isDeviceItemMatchOtaFileInfo(otaitem, item)) {
+          return item;
+        }
+      }, this);
+    }
+
     render() {
       var item = this.props.item;
       var supportedCluster = item.data.supportedCluster;
       var humanReadableDeviceType = this.getHumanReadableSensorType(item.data.deviceType);
-
       var extendedLightPanel;
       var basicPanel;
       var sensorInfo;
       var extendedInfo;
-      var otaupdatemeta;
-
-      if (item.data.otaUpdating) {
-        otaupdatemeta = (
-          <div className="ui segment control-panel">
-          <h4> Uploading Firmware Version: {item.data.otaTargetFirmwareVersion} </h4>
-            <div className="ui basic demo progress active" data-percent="100">
-              <div className="bar" style={{WebkitTransitionDuration: '300ms',
-                                            transitionDuration: '300ms',
-                                            width: item.data.otaUpdatePercent.toFixed(0)+'%'}}>
-                <div className="progress" />
-              </div>
-              <div className="label">{item.data.otaUpdatePercent.toFixed(0)}% Complete</div>
-            </div>
-            <div className="ui button basic silabsglobal"
-              onTouchTap={this.cancelUpdate.bind(this)}>
-              Cancel Upload
-            </div>
-          </div>
-        );
-      } else if (this.state.waiting) {
-        otaupdatemeta = (
-          <div className="ui segment control-panel">
-            <h4> Please wait.. starting upload or
-            another upload is in progress </h4>
-            <div className="ui button basic silabsglobal"
-              onTouchTap={this.cancelUpdate.bind(this)}>
-              Cancel Upload
-            </div>
-          </div>
-        );
-      } else {
-        otaupdatemeta = '';
-      }
+      var identifyModeToggle;
 
       if (Flux.stores.store.isLight(item.data)) {
         basicPanel = (
@@ -373,35 +387,88 @@ class ActivityItem extends React.Component {
           </div>
       );
 
-      var matches = 0;
-      var otaList = _.map(Flux.stores.store.getOTAList(), function(otaitem) {
-        // Check if item fields are defined
-        if (item.data.imageTypeId !== undefined && item.data.firmwareVersion !== undefined &&
-          item.data.imageTypeId !== null && item.data.firmwareVersion !== null) {
-          if (parseInt(otaitem.imageTypeId, 16) === parseInt(item.data.imageTypeId, 16)
-            && parseInt(otaitem.firmwareVersion, 16) !== parseInt(item.data.firmwareVersion, 16)) {
-            matches++;
-            return (
-              <div className="ui segment control-panel">
-                <div className="list">
-                  <div className="item"><h4>{otaitem.filename}</h4></div>
-                  <div className="item">Manf. ID: {otaitem.manufacturerId}</div>
-                  <div className="item">Image Type: {otaitem.imageTypeId}</div>
-                  <div className="item">Firmware Version: {otaitem.firmwareVersion}</div>
-                  <div className="item">Size: {otaitem.imageSizeKB}KB</div>
-                </div>
-                <div className="ui button basic silabsglobal"
-                  onTouchTap={this.copyImage.bind(this, otaitem, item)}>
-                  Load Item {parseInt(otaitem.firmwareVersion, 16) > parseInt(item.data.firmwareVersion, 16) ? "(Upgrade)" : "(Downgrade)"}
-                </div>
+      var otaUpdateMeta;
+      var recvOtaProgress = Flux.stores.store.getOtaProgress();
+      var otaFileList = Flux.stores.store.getOTAList();
+      var listMatch = this.isDeviceItemMatchOtaFilesList(otaFileList, item);
+      var isItemInOtaProgress = this.checkOtaProgressItemMatch(recvOtaProgress, item);
+
+      if (recvOtaProgress.status && isItemInOtaProgress && item.data.otaUpdating) {
+        otaUpdateMeta = (
+          <div className="ui segment control-panel">
+          <h4> Uploading Firmware Version: {item.data.otaTargetFirmwareVersion} </h4>
+            <div className="ui basic demo progress active" data-percent="100">
+              <div className="bar" style={{WebkitTransitionDuration: '300ms',
+                                           transitionDuration: '300ms',
+                                           width: item.data.otaUpdatePercent.toFixed(0)+'%'}}>
+                <div className="progress" />
               </div>
-            );
-          }
+              <div className="label">{item.data.otaUpdatePercent.toFixed(0)}% Complete</div>
+            </div>
+            <button className="ui red button"
+              onTouchTap={this.onCancelOta.bind(this)}>
+              Cancel
+            </button>
+          </div>
+        );
+      } else if (recvOtaProgress.status && isItemInOtaProgress && !item.data.otaUpdating) {
+        otaUpdateMeta = (
+          <div className="ui segment control-panel">
+            <div className="list">
+              <h5>{recvOtaProgress.policy + " File Name: " + listMatch.filename}</h5>
+            </div>
+            <div>{"Start " + recvOtaProgress.policy + ". Waiting End Node Response. It May Be At Sleep."}</div>
+            <br/>
+            <button className="ui red button"
+              onTouchTap={this.onCancelOta.bind(this)}>
+              Cancel
+            </button>
+          </div>
+        );
+      } else if (recvOtaProgress.status && !isItemInOtaProgress) {
+        otaUpdateMeta = (
+          <div className="ui segment control-panel">
+            <h5>Waiting for the termination of an existing OTA progress</h5>
+          </div>
+        );
+      } else {
+        otaUpdateMeta = '';
+      }
+
+      var otaList;
+      (item.data.deviceType === "group" || listMatch === undefined) ? otaList = [] :
+      otaList = _.map(otaFileList, function(otaitem) {
+        var individualMatch = this.isDeviceItemMatchOtaFileInfo(otaitem, item);
+        if (individualMatch) {
+          return (
+            <div className="ui segment control-panel" key={otaitem.filename}>
+              <div className="list">
+                <div><h5>{"File Name: " + otaitem.filename}</h5></div>
+                {"Manf. ID: " + otaitem.manufacturerId +
+                 "; Image Type: " + otaitem.imageTypeId +
+                 "; OTA File Ver.: " + otaitem.firmwareVersion +
+                 "; Size: " + otaitem.imageSizeKB + ' Bytes'}
+              </div>
+              <br/>
+              <button className="ui primary button"
+               onTouchTap={this.onTriggerOta.bind(this, otaitem, item)}>
+                {parseInt(otaitem.firmwareVersion, 16) > parseInt(item.data.firmwareVersion, 16) ? "Upgrade" : "Downgrade"}
+              </button>
+            </div>
+          );
         }
       }.bind(this));
 
-      if (matches === 0) {
-        otaList = (
+      var otaListMeta;
+      if (otaList.length !== 0) {
+        otaListMeta = (
+          <div>
+            <h5>Available OTA Files:</h5>
+            {recvOtaProgress.status ? otaUpdateMeta : otaList}
+          </div>
+        );
+      } else {
+        otaListMeta = (
           <div className="ui segment control-panel">
             <div className="list">
               <h4>No Images Found. Please place compatible OTA images in ota_staging directory. </h4>
@@ -410,22 +477,42 @@ class ActivityItem extends React.Component {
         );
       }
 
-      if (item.data.deviceType === "group") {
-        otaList = '';
+      if (item.data.isIdentifyServerClusterDetected &&
+          Flux.stores.store.getIdentifyModeStatus(item) === true) {
+        identifyModeToggle = (
+          <div className="ui button basic silabsglobal" style={{'paddingLeft':'1.8em', 'paddingRight': '1.8em'}}
+            onTouchTap={this.onExitIdentify.bind(this, item)}
+          >
+            Exit Identify Mode
+          </div>
+        );
+      } else if (item.data.isIdentifyServerClusterDetected &&
+                 Flux.stores.store.getIdentifyModeStatus(item) === false) {
+        identifyModeToggle = (
+          <div className="ui button basic silabsglobal" style={{'paddingLeft':'1.6em', 'paddingRight': '1.6em'}}
+            onTouchTap={this.onEnterIdentify.bind(this, item)}
+          >
+            Enter Identify Mode
+          </div>
+        );
+      } else {
+        identifyModeToggle = (
+          <div></div>
+        );
       }
 
       if (this.state.showExtendedInfo) {
         extendedInfo = (
           <div className="center aligned column">
           <div className="center aligned ui divider"></div>
-          <div className="ui button basic silabsglobal" onTouchTap={this.hideExtended.bind(this, item)}>Hide Extended Info</div>
-
+          <div className="ui button basic silabsglobal" style={{'paddingLeft':'1.6em', 'paddingRight': '1.6em'}}
+            onTouchTap={this.hideExtended.bind(this, item)}
+          >
+            Hide Extended Info
+          </div>
             {item.data.deviceType === "group" ? <ExtendedInfoGroup item={item}/> : <ExtendedInfo item={item}/>}
-
-            {!(item.data.deviceType === "group") ? <h4>Available OTA Images</h4> : "" }
             <div className="center aligned ui divider"></div>
-
-            {item.data.otaUpdating || this.state.waiting && !(item.data.deviceType === "group") ? otaupdatemeta : otaList}
+            {otaListMeta}
           </div>
         );
       } else {
@@ -454,6 +541,7 @@ class ActivityItem extends React.Component {
                       {basicPanel}
                       {extendedLightPanel}
                       {sensorInfo}
+                      {identifyModeToggle}
                       {extendedInfo}
                     </div>
                   </div>

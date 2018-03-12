@@ -7,12 +7,12 @@ var fs               = require('fs-extra')
   , GatewayInterface = require('../common/routes/GatewayInterface.js')
   , DeviceController = require('../common/controller/DeviceController.js')
   , ServerActions    = require('../common/actions/ServerActions.js')
-  , ota              = require('../common/OverTheAirUpdate.js')
+  , ota              = require('../common/controller/sub-modules/OverTheAirUpdate.js')
   , Logger           = require('../common/Logger.js')
   , Constants        = require('../common/Constants.js')
   , Config           = require('../common/Config.js');
 
-Logger.server.log('info', 'Silicon Labs HA MQTT/Websocket server starting... ');
+Logger.server.log('info', 'Silicon Labs ZB3.0 MQTT/Websocket server starting... ');
 
 // Pass servers into Server Actions
 ServerActions.GatewayInterface.mqttClient = GatewayInterface;

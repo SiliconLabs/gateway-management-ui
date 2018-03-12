@@ -1,21 +1,27 @@
+// Copyright 2017 Silicon Laboratories, Inc.
+
 var ip               = require('ip'),
   path               = require('path'),
   _                  = require('underscore'),
   fs                 = require('fs-extra'),
   ServerActions      = require('../actions/ServerActions.js'),
-  ota                = require('../OverTheAirUpdate.js'),
+  ota                = require('./sub-modules/OverTheAirUpdate.js'),
   Logger             = require('../Logger.js'),
   CustomerTest       = require('../CustomerTest.js'),
   Constants          = require('../Constants.js'),
   Config             = require('../Config.js'),
   Utilities          = require('../Utilities.js'),
-  ZCLDataTypes       = require('../ZCLDataTypes.js'),
-  ZCLAttributeNames  = require('../ZCLAttributeNames.js').ZCLAttributeNames;
-  ReportableZCLAttributeNames = require('../ZCLAttributeNames.js').ReportableZCLAttributeNames;
+  ZCLDataTypes       = require('../zcl-definitions/ZCLDataTypes.js'),
+  ZCLResponseActions = require('./ZCLResponseActions.js'),
+  ZB3KeyManagement   = require('./sub-modules/ZB3KeyManagement.js'),
+  ZCLAttributeNames  = require('../zcl-definitions/ZCLAttributeNames.js').ZCLAttributeNames;
+  ReportableZCLAttributeNames = require('../zcl-definitions/ZCLAttributeNames.js').ReportableZCLAttributeNames;
 
 var DeviceDBManagement = {
   // Cloud device list
   devices: {},
+  // Instantiate ZB3KeyManagement
+  zb3KeyManagement: new ZB3KeyManagement(),
 
   onNodeJoin: function(joiningDevice, gatewayEui) {
     if (this.isEndpointSupported(joiningDevice) &&
@@ -31,21 +37,61 @@ var DeviceDBManagement = {
       joiningDevice.nodeId = newNodeId;
       // Add to cloud state
       this.devices[joiningDevice.hash] = joiningDevice;
+      // Update tables in ZCLResponseActions
+      ZCLResponseActions.insertDeviceTable(joiningDevice.hash, joiningDevice);
 
       ServerActions.SocketInterface.publishDeviceJoinedToClients(joiningDevice);
       ServerActions.GatewayInterface.requestState();
+      // Try to reopen the network with key to improve multiple node joining
+      this.zb3KeyManagement.tryReopenNetworkWithLinkKey();
     }
   },
 
-  onNodeLeft: function(leavingEui) {
-    // Add to cloud state
-    _.each(this.devices, function(value, key) {
-      if (key.split('-')[0] == leavingEui) {
-        delete this.devices[key];
+  onDeviceListReceived: function(messageParsed, gatewayEui) {
+    var devices = {};
+
+    _.each(messageParsed.devices, function(joiningDevice) {
+      if (this.isEndpointSupported(joiningDevice) &&
+          this.isDeviceDisplayable(joiningDevice)) {
+        this.createDeviceTemplate(joiningDevice, gatewayEui, false);
+        // Preserve the new nodeId in case duplication
+        var newNodeId = joiningDevice.nodeId;
+        // Copy data from existing device (if it exists)
+        _.extend(joiningDevice, this.devices[joiningDevice.hash]);
+        // Assign new nodeId back.
+        joiningDevice.nodeId = newNodeId;
+        // Add to cloud state
+        devices[joiningDevice.hash] = joiningDevice;
       }
     }.bind(this));
 
-    ServerActions.SocketInterface.publishDeviceLeftToClients(leavingEui);
+    // Delete old devices
+    this.devices = {};
+    // Set to joined devices
+    this.devices = devices;
+
+    // Check if need to request attributes
+    _.each(this.devices, function(device) {
+      if(device.zclRequested === undefined
+          || !device.zclRequested) {
+        this.requestNodeDefaultAttributes(joiningDevice);
+        device.zclRequested = true;
+      }
+    }.bind(this));
+
+    this.sendCloudStateToClients();
+  },
+
+  onNodeLeft: function(leavingDeviceEui) {
+    // Add to cloud state
+    _.each(this.devices, function(value, key) {
+      if (key.split('-')[0] == leavingDeviceEui) {
+        delete this.devices[key];
+      }
+    }.bind(this));
+    // Update tables in ZCLResponseActions
+    ZCLResponseActions.deleteDeviceFromTable(leavingDeviceEui);
+    ServerActions.SocketInterface.publishDeviceLeftToClients(leavingDeviceEui);
     this.sendCloudStateToClients();
   },
 
@@ -57,41 +103,6 @@ var DeviceDBManagement = {
         ServerActions.SocketInterface.publishDeviceUpdateToClients(value);
       }
     }.bind(this));
-  },
-
-  onDeviceListReceived: function(messageParsed, gatewayEui) {
-    var devices = {};
-
-    _.each(messageParsed.devices, function(joiningDevice) {
-      if (this.isEndpointSupported(joiningDevice) &&
-          this.isDeviceDisplayable(joiningDevice)) {
-        this.createDeviceTemplate(joiningDevice, gatewayEui, false);
-        // Preserve the new nodeId in case duplication.
-        var newNodeId = joiningDevice.nodeId;
-        // Copy data from existing device (if it exists)
-        _.extend(joiningDevice, this.devices[joiningDevice.hash]);
-        // Assign new nodeId back.
-        joiningDevice.nodeId = newNodeId;
-        // Add to cloud state
-        devices[joiningDevice.hash] = joiningDevice;
-      }
-    }.bind(this));
-
-    // delete old devices
-    this.devices = {};
-    //set to joined devices
-    this.devices = devices;
-
-    //check if need to request attributes
-    _.each(this.devices, function(device) {
-      if(device.zclRequested === undefined
-          || !device.zclRequested) {
-        this.requestNodeDefaultAttributes(joiningDevice);
-        device.zclRequested = true;
-      }
-    }.bind(this));
-
-    this.sendCloudStateToClients();
   },
 
   clearDevicesList: function() {
@@ -117,6 +128,11 @@ var DeviceDBManagement = {
     if (isOnNodeJoin) {
       joiningDevice.zclRequested = true;
     }
+    if (this.isSleepyDevice(joiningDevice)) {
+      joiningDevice.sleepyDevice = true;
+    } else {
+      joiningDevice.sleepyDevice = false;
+    }
     joiningDevice.otaUpdating = false;
     joiningDevice.otaTotalBytesSent = 0;
     joiningDevice.otaUpdatePercent = 0;
@@ -134,6 +150,15 @@ var DeviceDBManagement = {
           }
         }.bind(this));
     }
+  },
+
+  isSleepyDevice: function(device) {
+    var deviceType = device.deviceType;
+
+    if (parseInt(deviceType) in Constants.NON_SLEEPY_DEVICE_TYPE_TABLE){
+      return false;
+    }
+    return true;
   },
 
   allocateClusterType: function(clusterInfoElement) {
@@ -224,7 +249,8 @@ var DeviceDBManagement = {
   isEndpointSupported: function(joiningDevice) {
     var endpoint = joiningDevice.deviceEndpoint.endpoint;
     return (endpoint == Constants.SELF_ENDPOINT ||
-            endpoint == Constants.SMART_ENERGY_ENDPOINT) ? false : true;
+            endpoint == Constants.SMART_ENERGY_ENDPOINT ||
+            endpoint == Constants.GREEN_POWER_ENDPOINT) ? false : true;
   },
 
   checkMatchingDevice: function(joinedDevice, cloudDevice) {

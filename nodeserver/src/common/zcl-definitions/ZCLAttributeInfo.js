@@ -1,6 +1,6 @@
 // Copyright 2015 Silicon Laboratories, Inc.
 
-var Constants = require('./Constants');
+var Constants = require('../Constants');
 
 var DEFAULT_MAX_REPORTING = 1800;
 
@@ -210,6 +210,18 @@ var ZCLAttributeInfo = {
     defaultReportableChangeThreshold: 1,
     defaultReportingMin: 1,
     defaultReportingMax: DEFAULT_MAX_REPORTING
+  },
+  rssiValue: {
+    clusterID: Constants.DIAGNOSTICS_CLUSTER,
+    attributeID: Constants.RSSI_VAL_ATTRIBUTE,
+    datatype: Constants.RSSI_VAL_TYPE,
+    clusterFriendly: 'diagnosticsCluster'
+  },
+  lqiValue: {
+    clusterID: Constants.DIAGNOSTICS_CLUSTER,
+    attributeID: Constants.LQI_VAL_ATTRIBUTE,
+    datatype: Constants.LQI_VAL_TYPE,
+    clusterFriendly: 'diagnosticsCluster'
   }
 };
 

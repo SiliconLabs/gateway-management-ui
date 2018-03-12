@@ -42,6 +42,10 @@ var ServerActions = {
       this.dispatch(Constants.DEVICE_UPDATE, updatedNode);
     }.bind(this));
 
+    _socket.on('otaevents', function(otaEvent) {
+      this.dispatch(Constants.OTA_EVENTS, otaEvent);
+    }.bind(this));
+
     _socket.on('serversettings', function(data) {
       this.dispatch(Constants.SERVER_SETTINGS, data);
     }.bind(this));
@@ -86,10 +90,6 @@ var ServerActions = {
       this.dispatch(Constants.GATEWAY_LOG_STREAM, stream);
     }.bind(this));
 
-    _socket.on('executed', function(executed) {
-      console.log('Gateway Executed: ' + JSON.stringify(executed));
-    }.bind(this));
-
     _socket.on('installcodecollection', function(data) {
       this.dispatch(Constants.INSTALL_COLLECTION, data);
     }.bind(this));
@@ -98,21 +98,27 @@ var ServerActions = {
       callback(true);
     }.bind(this));
 
-    _socket.on('connect_error', function() {
-      console.log('connect_error');
-    }.bind(this));
+    if(Constants.CONSOLE_LOG_ENABLED) {
+      _socket.on('executed', function(executed) {
+        console.log('Gateway Executed: ' + JSON.stringify(executed));
+      }.bind(this));
 
-    _socket.on('connect_timeout', function() {
-      console.log('connect_timeout');
-    }.bind(this));
+      _socket.on('connect_error', function() {
+        console.log('connect_error');
+      }.bind(this));
 
-    _socket.on('reconnect_attempt', function() {
-      console.log('reconnect_attempt');
-    }.bind(this));
+      _socket.on('connect_timeout', function() {
+        console.log('connect_timeout');
+      }.bind(this));
 
-    _socket.on('reconnect_failed', function() {
-      console.log('Reconnection failed');
-    }.bind(this));
+      _socket.on('reconnect_attempt', function() {
+        console.log('reconnect_attempt');
+      }.bind(this));
+
+      _socket.on('reconnect_failed', function() {
+        console.log('Reconnection failed');
+      }.bind(this));
+    }
   },
 
   gatewayPermitJoiningZB3: function(deviceEui, installCode, delayMs) {
@@ -125,14 +131,6 @@ var ServerActions = {
 
   gatewayPermitJoiningZB3InstallCodeOnly: function(deviceEui, installCode, delayMs) {
     _socket.emit('action', {"type":"permitjoinZB3InstallCodeOnly", deviceEui, installCode, delayMs});
-  },
-
-  gatewayPermitJoining: function(delayMs) {
-    _socket.emit('action', {"type":"permitjoinms", delayMs});
-  },
-
-  gatewayPermitJoiningOff: function() {
-    _socket.emit('action', {"type":"permitjoinoff"});
   },
 
   gatewayPermitJoiningOffZB3: function() {
@@ -202,10 +200,6 @@ var ServerActions = {
     });
   },
 
-  reformNetwork: function(radioChannel, networkPanId, radioTxPower) {
-    _socket.emit('action', {"type":"reformnetwork", radioChannel, networkPanId, radioTxPower});
-  },
-
   simpleReformZB3Network: function() {
     _socket.emit('action', {"type":"simpleReformZB3Network"});
   },
@@ -216,7 +210,10 @@ var ServerActions = {
 
   removeNode: function(node) {
     var nodeId = node.data.nodeId;
-    _socket.emit('action', {"type":"removedevice", nodeId});
+    var deviceEui = node.data.deviceEndpoint.eui64;
+    var endpoint = node.data.deviceEndpoint.endpoint;
+
+    _socket.emit('action', {"type":"removedevice", nodeId, deviceEui, endpoint});
   },
 
   setDeviceToggle: function(node) {
@@ -247,6 +244,16 @@ var ServerActions = {
       var deviceEndpoint = node.data.deviceEndpoint;
       _socket.emit('action', {"type":"lighton", deviceEndpoint});
     }
+  },
+
+  enterIdentify: function(node) {
+    var deviceEndpoint = node.data.deviceEndpoint;
+    _socket.emit('action', {"type":"enterIdentify", deviceEndpoint});
+  },
+
+  exitIdentify: function(node) {
+    var deviceEndpoint = node.data.deviceEndpoint;
+    _socket.emit('action', {"type":"exitIdentify", deviceEndpoint});
   },
 
   setLightLevel: function(level, node) {

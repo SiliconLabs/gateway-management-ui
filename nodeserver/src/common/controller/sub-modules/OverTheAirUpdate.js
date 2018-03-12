@@ -2,13 +2,13 @@
 
 var fs             = require('fs-extra'),
   path             = require('path'),
-  Constants        = require('./Constants.js'),
-  Utilities        = require('./Utilities.js'),
-  Logger           = require('./Logger.js');
+  Constants        = require('../../Constants.js'),
+  Utilities        = require('../../Utilities.js'),
+  Logger           = require('../../Logger.js');
 
-var otaArchivePath = path.join(__dirname, Constants.otaArchivePath);
+var otaArchivePath = path.join(__dirname, Constants.otaArchiveSearchingPath);
 
-// Variable definitions for the ZigBee firmware over-the-air upgrade 
+// Variable definitions for the ZigBee firmware over-the-air upgrade
 var MAGIC_NUMBER_OFFSET   = 0;
 var HEADER_VERSION_OFFSET = 4;
 var HEADER_LENGTH_OFFSET  = 6;
@@ -41,7 +41,7 @@ var ota = {
 
       for (var x = 0; x < this.otaFiles.length; x++)  {
         if (this.otaFiles[x] !== undefined) {
-          var path = otaArchivePath + '/' + this.otaFiles[x].filename; 
+          var path = otaArchivePath + '/' + this.otaFiles[x].filename;
 
           var fd = fs.openSync(path, 'r');
 
@@ -75,7 +75,7 @@ var ota = {
 
     Logger.server.info('Znet OTA Directory: ' + Constants.znetOtaDirectory + ' Cleared');
 
-    Logger.server.info('Copying to:' + Constants.znetOtaDirectory + 
+    Logger.server.info('Copying to:' + Constants.znetOtaDirectory +
       ' from: ' + otaArchivePath + '/' + fileName);
 
     // From, To

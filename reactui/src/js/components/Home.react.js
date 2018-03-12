@@ -37,7 +37,7 @@ class Home extends React.Component {
     var itemlist = Flux.stores.store.getHumanReadableDevices();
     var items = _.map(itemlist, function(item) {
       return (
-         <ActivityItem item={item} />
+         <ActivityItem item={item} key={item.name}/>
       );
     }, this);
 

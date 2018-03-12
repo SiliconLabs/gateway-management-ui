@@ -2,11 +2,11 @@
  * @jsx React.DOM
  */
 
-var DeviceListControl = require('./DeviceListControl.react');
 var Flux = require('../Flux');
 var React = require('react');
 var Constants = require('../Constants');
 var ReactCSSTransitionGroup = require('react-addons-css-transition-group');
+var DeviceListControl = require('./DeviceListControl.react');
 var RuleCreationDialog = require('./RuleCreationDialog.react');
 var ExtendedNetworkDialog = require('./ExtendedNetworkDialog.react');
 var RulesListControl = require('./RulesListControl.react');
@@ -18,11 +18,15 @@ class ControlPanel extends React.Component {
   constructor(props) {
     super(props);
 
+    this.timer = 0;
+    this.startTimer = this.startTimer.bind(this);
+    this.stopTimer = this.stopTimer.bind(this);
+    this.timerCountDown = this.timerCountDown.bind(this);
     this.state = {
-      isZB3NetworkReformSelected: true,
       installCodeOnlyForJoin: false,
       addingDevice: false,
       addingDeviceProgress: 0,
+      resumeAddDevice: false,
       addingRule: false,
       reforming: false,
       showRulesAdd: true,
@@ -38,13 +42,24 @@ class ControlPanel extends React.Component {
       installCode: '',
       validZB3Keys: false,
       ZB3KeysEmpty: true,
-      isPjoinInProgress: false,
-      isZB3PjoinInProgress: false,
       displayName: 'ControlPanel',
     };
   }
 
   componentDidMount() {
+    var addingDeviceStatus = Flux.stores.store.loadAddingDeviceStatus();
+
+    if (addingDeviceStatus !== undefined) {
+      this.setState({
+        addingDevice: addingDeviceStatus['addingDevice'],
+        addingDeviceProgress: addingDeviceStatus['addingDeviceProgress']
+      });
+      if (addingDeviceStatus['addingDevice'] === true) {
+        this.setState({resumeAddDevice: true});
+      }
+      this.forceUpdate();
+    }
+
     Flux.stores.store.getBuildInfo(function(info) {
       this.setState({
         version: info.version
@@ -65,7 +80,7 @@ class ControlPanel extends React.Component {
             networkUp: false,
             channel: '14',
             pan: this.generateRandomPan(),
-            power: '0',
+            power: '20',
           });
         } else if (Flux.stores.store.heartbeat.networkUp && !this.state.reforming) {
           this.setState({
@@ -91,7 +106,19 @@ class ControlPanel extends React.Component {
     }.bind(this));
   }
 
+  componentDidUpdate(prevProps, prevState) {
+    if (this.state.resumeAddDevice !== prevState.resumeAddDevice &&
+        this.state.resumeAddDevice === true &&
+        this.state.addingDevice === true &&
+        this.state.addingDeviceProgress > prevState.addingDeviceProgress) {
+      this.startTimer();
+    }
+  }
+
   componentWillUnmount() {
+    this.stopTimer();
+    Flux.stores.store.setAddingDeviceStatus(this.state.addingDevice,
+                                            this.state.addingDeviceProgress);
     Flux.stores.store.removeListener('change')
   }
 
@@ -100,78 +127,66 @@ class ControlPanel extends React.Component {
     return String('0000' + randomPanValue.toString(16)).slice(-4).toString().toUpperCase();
   }
 
-  onAddDevice() {
-    var ZB3PjoinEnabled = false;
-    var pjoinEnabled = false;
+  onAddDevice(countDownValue) {
+    if (this.state.resumeAddDevice) {
+      return;
+    }
     if (!this.state.ZB3KeysEmpty &&
         this.state.validZB3Keys &&
         !this.state.installCodeOnlyForJoin &&
         (Flux.stores.store.getNetworkSecurityLevel() == 'Z3')) {
       Flux.actions.gatewayPermitJoiningZB3(this.state.deviceEui,
                                             this.state.installCode,
-                                            120);
-      ZB3PjoinEnabled = true;
+                                            countDownValue);
     } else if (!this.state.ZB3KeysEmpty &&
                 this.state.validZB3Keys &&
                 this.state.installCodeOnlyForJoin &&
                 (Flux.stores.store.getNetworkSecurityLevel() == 'Z3')) {
       Flux.actions.gatewayPermitJoiningZB3InstallCodeOnly(this.state.deviceEui,
                                                           this.state.installCode,
-                                                          120);
-      ZB3PjoinEnabled = true;
+                                                          countDownValue);
     } else if (this.state.ZB3KeysEmpty &&
               (Flux.stores.store.getNetworkSecurityLevel() == 'Z3')) {
-      Flux.actions.gatewayPermitJoiningZB3OpenNetworkOnly(120);
-      ZB3PjoinEnabled = true;
-    } else {
-      Flux.actions.gatewayPermitJoining(120);
-      pjoinEnabled = true;
+      Flux.actions.gatewayPermitJoiningZB3OpenNetworkOnly(countDownValue);
     }
     // Progress display stuff
     this.setState({
-      addingDeviceProgress: 120,
-      addingDevice: true,
-      isZB3PjoinInProgress: ZB3PjoinEnabled,
-      isPjoinInProgress: pjoinEnabled
+      addingDeviceProgress: countDownValue,
+      addingDevice: true
     });
-
-    var waitForNextSecond;
-    if (!this.state.addingDevice) {
-      waitForNextSecond = function() {
-        window.setTimeout(function() {
-          if (this.state.addingDeviceProgress > 0) {
-            this.setState({
-              addingDeviceProgress: this.state.addingDeviceProgress - 1});
-            waitForNextSecond();
-          } else {
-            if (this.state.isPjoinInProgress ||
-                this.state.isZB3PjoinInProgress) {
-              Flux.actions.gatewayPermitJoiningOff();
-            }
-            this.setState({
-              addingDevice: false,
-              isPjoinInProgress: false,
-              isZB3PjoinInProgress: false
-            });
-          }
-        }.bind(this), 1000);
-      }.bind(this);
-      waitForNextSecond();
-    }
+    this.startTimer();
   }
 
   onDisablePjoin() {
-    if (this.state.isZB3PjoinInProgress) {
-      Flux.actions.gatewayPermitJoiningOffZB3();
-    } else if (this.state.isPjoinInProgress) {
-      Flux.actions.gatewayPermitJoiningOff();
-    }
+    Flux.actions.gatewayPermitJoiningOffZB3();
+    this.stopTimer();
     this.setState({
       addingDeviceProgress: 0,
       addingDevice: false,
-      isPjoinInProgress: false,
-      isZB3PjoinInProgress: false
+      resumeAddDevice: false
     });
+  }
+
+  startTimer() {
+    if (this.timer === 0) {
+      this.timer = setInterval(this.timerCountDown, 1000);
+    }
+  }
+
+  stopTimer() {
+    clearInterval(this.timer);
+    this.timer = 0;
+  }
+
+  timerCountDown() {
+    var timeLeft = this.state.addingDeviceProgress - 1;
+
+    this.setState({addingDeviceProgress: timeLeft});
+    if (timeLeft <= 0) {
+      this.stopTimer();
+      Flux.actions.gatewayPermitJoiningOffZB3();
+      this.setState({addingDevice: false, resumeAddDevice: false});
+    }
   }
 
   validateChannel(chanStr) {
@@ -244,10 +259,7 @@ class ControlPanel extends React.Component {
 
   validateInstallCode(installCode) {
     if (installCode
-      && (installCode.length === 32
-      || installCode.length === 24
-      || installCode.length === 16
-      || installCode.length === 12)) {
+      && (installCode.length === 32)) {
         return true;
     } else {
       return false;
@@ -317,13 +329,8 @@ class ControlPanel extends React.Component {
       installCodeOnlyForJoin: false
     });
     if (this.validateAll(channel, pan, power)) {
-      if (this.state.isZB3NetworkReformSelected) {
-        Flux.actions.reformZB3Network(channel, pan, power - 22);
-        Flux.stores.store.setNetworkSecurityLevel('Z3');
-      } else {
-        Flux.actions.reformNetwork(channel, pan, power - 22);
-        Flux.stores.store.setNetworkSecurityLevel('HA');
-      }
+      Flux.actions.reformZB3Network(channel, pan, power - 22);
+      Flux.stores.store.setNetworkSecurityLevel('Z3');
       this.setState({
         networkUp: false,
         reforming: true,
@@ -351,27 +358,8 @@ class ControlPanel extends React.Component {
       validZB3Keys: false,
       installCodeOnlyForJoin: false
     });
-    if (this.state.isZB3NetworkReformSelected) {
-      Flux.actions.simpleReformZB3Network();
-      Flux.stores.store.setNetworkSecurityLevel('Z3');
-    } else {
-      if (this.validateAll(this.state.channel, this.state.pan, this.state.power)) {
-        Flux.actions.reformNetwork(this.state.channel, this.state.pan, this.state.power - 22);
-        Flux.stores.store.setNetworkSecurityLevel('HA');
-        this.setState({
-          networkUp: false,
-          reforming: true,
-          validNetInfo: true,
-          extendedForm: false,
-        });
-        setTimeout(function() {
-          this.setState({ reforming: false })
-          Flux.actions.getGatewayState();
-        }.bind(this), Constants.REFORM_TIMEOUT);
-      } else {
-        this.setState({ validNetInfo: false });
-      }
-    }
+    Flux.actions.simpleReformZB3Network();
+    Flux.stores.store.setNetworkSecurityLevel('Z3');
   }
 
   onAddRule() {
@@ -453,7 +441,6 @@ class ControlPanel extends React.Component {
     } else {
       Flux.actions.removeGroup(node.data.groupName);
     }
-
     this.forceUpdate();
   }
 
@@ -510,10 +497,6 @@ class ControlPanel extends React.Component {
     });
   }
 
-  toggleZB3Network() {
-    this.setState({isZB3NetworkReformSelected: !this.state.isZB3NetworkReformSelected});
-  }
-
   toggleInstallCodeOnly() {
     this.setState({installCodeOnlyForJoin: !this.state.installCodeOnlyForJoin});
   }
@@ -562,9 +545,11 @@ class ControlPanel extends React.Component {
   }
 
   render() {
-    var addDeviceButtonText = this.state.addingDevice ?
+
+    var addDeviceButtonText = this.state.resumeAddDevice ?
+      'Resume listening for ' + this.state.addingDeviceProgress +
+      ' seconds' : this.state.addingDevice ?
       'Listening for ' + this.state.addingDeviceProgress + ' seconds' :
-      (Flux.stores.store.getNetworkSecurityLevel() != 'Z3') ? 'ZigBee HA Device' :
       (this.state.installCodeOnlyForJoin &&
        !this.state.ZB3KeysEmpty &&
        this.state.validZB3Keys) ? 'ZigBee3.0 Device (Install Code Only)' :
@@ -606,34 +591,58 @@ class ControlPanel extends React.Component {
       )
     }
 
-    var devices = (
-      <div className="column">
-        <h4 className="ui header">Attached Devices</h4>
-        <DeviceListControl items={Flux.stores.store.getHumanReadableDevices()}
+    var recvDeviceList = Flux.stores.store.getHumanReadableDevices();
+    var deviceListCtrl = _.map(recvDeviceList, (item) => {
+      return (
+        <DeviceListControl item={item}
+          key={item.name}
           onRemove={this.onRemoveNode.bind(this)}
           onDeviceToggle={this.onDeviceToggle.bind(this)}
           onDeviceOn={this.onDeviceOn.bind(this)}
           onDeviceOff={this.onDeviceOff.bind(this)}
           bindTemp={this.bindTemp.bind(this)}/>
+      );
+    }, this);
+    var isDeviceListEmpty = (deviceListCtrl.length === 0) ? true : false;
+
+    var devices = (
+      <div className="column">
+        <h4 className="ui header">Attached Devices</h4>
+        {isDeviceListEmpty ?
+          <div>
+            <div className="ui message">
+              <div className="header">No Attached Devices</div>
+              <p>Please start joining procedure below.</p>
+            </div>
+          </div> :
+          <div className="ui segment">
+            <div className="ui divided list device-list">
+              {deviceListCtrl}
+            </div>
+          </div>
+        }
+        <br/>
         <div style={{'display': 'inline-block'}}>
           Device EUI:
-          <div className="ui input" style={{"width":200, 'paddingLeft':'0.8em', 'paddingRight': '0.5em'}}>
+          <div className="ui input" style={{'width':323, 'paddingLeft':'0.8em', 'paddingRight': '0.5em'}}>
             <input
               type="text"
-                value={this.state.deviceEui}
-                onChange={this.setDeviceEui.bind(this)}
-                disabled={Flux.stores.store.getNetworkSecurityLevel() === 'HA'}
+              maxLength="40"
+              size="40"
+              value={this.state.deviceEui}
+              onChange={this.setDeviceEui.bind(this)}
             />
           </div>
         </div>
         <div style={{'display': 'inline-block'}}>
           Install Code:
-          <div className="ui input" style={{"width":200, 'paddingLeft':'0.5em', 'paddingRight': '0.5em'}}>
+          <div className="ui input" style={{'width':320, 'paddingLeft':'0.5em', 'paddingRight': '0.5em'}}>
             <input
               type="text"
-                value={this.state.installCode}
-                onChange={this.setInstallCode.bind(this)}
-                disabled={Flux.stores.store.getNetworkSecurityLevel() === 'HA'}
+              maxLength="40"
+              size="40"
+              value={this.state.installCode}
+              onChange={this.setInstallCode.bind(this)}
             />
           </div>
           {!this.state.ZB3KeysEmpty ?
@@ -647,7 +656,7 @@ class ControlPanel extends React.Component {
           <div className="ui icon error message">
             <i className="small attention circle icon"></i>
             <div className="content">
-              <p>Invalid install code or Device EUI. Please check the length of the install code, and make sure Device EUI is 16 digits.</p>
+              <p>Invalid install code or Device EUI. Please check the length of the install code (16 bytes), and make sure Device EUI is 16 digits.</p>
             </div>
           </div> : ""
         }
@@ -656,7 +665,7 @@ class ControlPanel extends React.Component {
           <input id="Install Code only"
             checked={this.state.installCodeOnlyForJoin}
             onChange={this.toggleInstallCodeOnly.bind(this)}
-            disabled={Flux.stores.store.getNetworkSecurityLevel() === 'HA' || !this.state.validZB3Keys}
+            disabled={!this.state.validZB3Keys}
             type="checkbox" name="public" />
           <label htmlFor="Install Code only">Allow Join Only With Install Code</label>
         </div>
@@ -664,13 +673,13 @@ class ControlPanel extends React.Component {
         <br/>
         <div>
           <div className={'ui basic silabsglobal button'}
-            onTouchTap={this.onAddDevice.bind(this)}>
-          <i className="plus icon"></i>
-          {addDeviceButtonText}
+            onTouchTap={this.onAddDevice.bind(this, 180)}>
+            {!this.state.resumeAddDevice &&
+              <i className="plus icon"></i>
+            }
+            {addDeviceButtonText}
+          </div>
         </div>
-        {addGroupButton}
-        </div>
-        {groupCreation}
         <br/>
         <ReactCSSTransitionGroup transitionName="rulescreation" transitionEnterTimeout={300} transitionLeaveTimeout={300}>
           {cancel}
@@ -745,7 +754,7 @@ class ControlPanel extends React.Component {
     );
 
     var reformButton;
-    var reformButtonText = this.state.isZB3NetworkReformSelected ? 'Reform ZigBee3.0 Network' : 'Reform ZigBee HA Network';
+    var reformButtonText = 'Reform ZigBee3.0 Network';
     if (this.state.reformbutton) {
       reformButton = (
         <div>
@@ -792,8 +801,7 @@ class ControlPanel extends React.Component {
         {(this.state.networkUp === undefined) ?
         'ZigBee Network: Unknown' :
         !this.state.networkUp ?
-        'ZigBee Network: Down' : (Flux.stores.store.getNetworkSecurityLevel() == 'Z3') ?
-        'ZigBee3.0 Network: Up' : 'ZigBee HA Network: Up'}
+        'ZigBee3.0 Network: Down' : 'ZigBee3.0 Network: Up'}
         </h4>
         <br/>
         {(this.state.networkUp === undefined) ?
@@ -809,17 +817,9 @@ class ControlPanel extends React.Component {
         Power(dBm): {this.state.power}
         </div>
         <br/>
-        <div className="ui toggle checkbox">
-          <input id="ZB3 Security"
-            checked={this.state.isZB3NetworkReformSelected}
-            onChange={this.toggleZB3Network.bind(this)}
-            type="checkbox" name="public" />
-          <label htmlFor="ZB3 Security">ZigBee3.0 Security For Network Reform</label>
-        </div>
-        </div>
+      </div>
         : ''}
 
-        <br/>
           <div className="ui stackable two column grid">
             <div className="column">
             {reformButton}

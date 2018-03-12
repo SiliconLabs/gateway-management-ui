@@ -43,7 +43,9 @@ class Application extends React.Component {
   selectTab(tab) {
     Flux.actions.getGatewayState();
     Flux.actions.getWebserverState();
-    Flux.actions.gatewayPermitJoiningOff();
+    if (Flux.stores.store.closeAddingDeviceIfExpired()) {
+      Flux.actions.gatewayPermitJoiningOffZB3();
+    }
     cookie.save('selectedMenu', tab);
     this.setState({
       selectedMenu: tab

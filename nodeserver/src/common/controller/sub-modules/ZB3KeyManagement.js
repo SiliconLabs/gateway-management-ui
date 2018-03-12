@@ -1,10 +1,10 @@
 'use strict';
 // Copyright 2015 Silicon Laboratories, Inc.
-var ServerActions   = require('./actions/ServerActions.js'),
-    Constants       = require('./Constants.js'),
+var ServerActions   = require('../../actions/ServerActions.js'),
+    Constants       = require('../../Constants.js'),
+    Logger          = require('../../Logger.js'),
     fs              = require('fs-extra'),
     path            = require('path'),
-    Logger          = require('./Logger.js'),
     child_process   = require('child_process'),
     _               = require('underscore');
 
@@ -14,6 +14,10 @@ var ZB3KeysStorePath = path.join(__dirname, Constants.zb3KeysStore);
 class ZB3KeyManagement {
   constructor() {
     this.ZB3KeysList = {};
+    // The following variables are to improve multiple node joining
+    this.reopenNetworkWithLinkKey = false;
+    this.reopenNetworkType = '';
+    this.latestLinkKey = '';
 
     /* Load from filesystem gateway file to get gateway history. */
     if (fs.existsSync(ZB3KeysStorePath)) {
@@ -39,12 +43,43 @@ class ZB3KeyManagement {
       var formattedLinkKey = this.formatCliByteString(linkKey);
       if (!installCodeOnly) {
         ServerActions.GatewayInterface.zigbee3PermitJoinMs(formattedDeviceEui,
-                                                           formattedLinkKey);
+                                                           formattedLinkKey,
+                                                           false);
       } else {
         ServerActions.GatewayInterface.zigbee3PermitJoinMsInstallCode(formattedDeviceEui,
-                                                                      formattedLinkKey);
+                                                                      formattedLinkKey,
+                                                                      false);
       }
       this.addKey(deviceEui, installCode, linkKey);
+      this.latestLinkKey = linkKey;
+    }
+  }
+
+  tryReopenNetworkWithLinkKey() {
+    if (this.reopenNetworkWithLinkKey) {
+      var formattedDeviceEui = this.formatCliByteString(Constants.WILDCARD_DEVICE_EUI);
+      var formattedLinkKey = this.formatCliByteString(this.latestLinkKey);
+      switch(this.reopenNetworkType) {
+        case 'installCodeOnly':
+          if (this.latestLinkKey){
+            ServerActions.GatewayInterface.zigbee3PermitJoinMsInstallCode(formattedDeviceEui,
+                                                                          formattedLinkKey,
+                                                                          true);
+          }
+          break;
+        case 'centralized':
+          ServerActions.GatewayInterface.zigbee3PermitJoinMsOpenNetworkOnly();
+          break;
+        case 'mixed':
+          if (this.latestLinkKey){
+            ServerActions.GatewayInterface.zigbee3PermitJoinMs(formattedDeviceEui,
+                                                               formattedLinkKey,
+                                                               true);
+          }
+          break;
+        default:
+          break;
+      }
     }
   }
 
@@ -109,6 +144,35 @@ class ZB3KeyManagement {
   clearKeys(){
     this.ZB3KeysList = {};
     fs.writeFileSync(ZB3KeysStorePath, JSON.stringify(this.ZB3KeysList));
+  }
+
+  updateReopenNetworkFlag(actionType, deviceEui) {
+    switch(actionType) {
+      case 'installCodeOnly':
+        if (deviceEui.toUpperCase() === Constants.WILDCARD_DEVICE_EUI){
+          this.reopenNetworkWithLinkKey = true;
+          this.reopenNetworkType = 'installCodeOnly';
+        }
+        break;
+      case 'centralized':
+        this.reopenNetworkWithLinkKey = true;
+        this.reopenNetworkType = 'centralized';
+        break;
+      case 'mixed':
+        if (deviceEui.toUpperCase() === Constants.WILDCARD_DEVICE_EUI){
+          this.reopenNetworkWithLinkKey = true;
+          this.reopenNetworkType = 'mixed';
+        }
+        break;
+      case 'close':
+        this.reopenNetworkWithLinkKey = false;
+        this.latestLinkKey = '';
+        this.reopenNetworkType = '';
+        break;
+      default:
+        Logger.server.log('info', 'openNetworkType not recognized.');
+        break;
+    }
   }
 }
 

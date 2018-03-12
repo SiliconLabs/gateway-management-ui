@@ -70,8 +70,10 @@ mqttClient.on('error', function() {
 var events = new MQTTEmitter();
 
 mqttClient.on('message', function(topic, message) {
+  if (topic.indexOf('heartbeat') === -1){
     Logger.server.log('info', 'MQTT Received (topic): ' + topic);
     Logger.server.log('info', 'MQTT Received (message): ' + message);
+  }
 
   try {
     var messageParsed = JSON.parse(message);

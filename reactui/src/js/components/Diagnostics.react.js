@@ -2,10 +2,9 @@
  * @jsx React.DOM
  */
 
-var Flux = require('../Flux');
-var Dropdown = require('./Dropdown.react');
 var React = require('react');
-
+var Flux = require('../Flux');
+var Constants = require('../Constants');
 
 class Testing extends React.Component {
 
@@ -13,6 +12,7 @@ class Testing extends React.Component {
     super(props);
 
     this.state = {
+      cmdPointer: 0,
       period: '50',
       interations: '50',
       deviceTableIndex: -1,
@@ -172,19 +172,64 @@ class Testing extends React.Component {
   sendMessage(message) {
     if (message) {
       Flux.actions.setWebserverAttribute('logStreaming', true);
-      Flux.actions.sendCommands([{command: message}])
-      this.setState({logStreaming: true});
+      Flux.actions.sendCommands([{commandcli: message}]);
+      this.changeCmdHistory(message);
+      this.setState({logStreaming: true, cmdPointer: 0, cli: ''});
     };
+  }
+
+  rotateBuffer(n, cmdPointer, bufferSize) {
+    if(bufferSize === 0) return 0;
+    return (bufferSize + (cmdPointer + n) % bufferSize) % bufferSize;
+  }
+
+  rotateCmdHistory(n) {
+    var cmdHistory = Flux.stores.store.getCmdHistory();
+    if(cmdHistory.size() === 0) return;
+    var cmdPointer = this.rotateBuffer(n,
+                                       this.state.cmdPointer,
+                                       cmdHistory.size());
+    var inputText = cmdHistory.get(cmdPointer);
+    this.setState({cmdPointer: cmdPointer, cli: inputText});
+  }
+
+  changeCmdHistory(command) {
+    if(command === '') return;
+    var cmdHistory = Flux.stores.store.getCmdHistory();
+    if(command !== cmdHistory.get(0)) {
+      Flux.stores.store.insertCmdHistory(command);
+    }
+  }
+
+  previousHistoryCmd() {
+    this.rotateCmdHistory(1);
+  }
+
+  nextHistoryCmd() {
+    this.rotateCmdHistory(-1);
   }
 
   handleChange(e) {
     this.setState({cli: e.target.value.toString()});
-      if (e.nativeEvent.keyCode == 13) {
-        this.sendMessage(e.target.value.toString())
-      }
   }
 
+  handleKeyDown(e) {
+    if (e.nativeEvent.keyCode == 13) {
+      // return key.
+      this.sendMessage(e.target.value.toString());
+    } else if(e.nativeEvent.keyCode == 38) {
+      // up key.
+      this.previousHistoryCmd();
+    } else if(e.nativeEvent.keyCode == 40) {
+      // down key.
+      this.nextHistoryCmd();
+    }
+  }
+
+  handleEmpty() {}
+
   render() {
+    var inputLabel = "Cli Command >";
     var tabmenu = (
       <div className="ui tabular menu">
         <a className={this.state.currentTab == 'server' ? 'active item' : 'item'}
@@ -206,11 +251,14 @@ class Testing extends React.Component {
     } else if (this.state.currentTab == 'gateway') {
       log = Flux.stores.store.gatewayLog;
       meta = (
-        <div className="ui input" style={{width: '100%'}}>
+        <div className="ui labeled input" style={{width: '100%'}}>
+          <div className="ui label">{inputLabel}</div>
           <input type="text"
-          placeholder="Input CLI Command..."
-          onKeyDown={this.handleChange.bind(this)}
-          style={{width: '100%'}}
+            placeholder="e.g., info"
+            value={this.state.cli}
+            onKeyDown={this.handleKeyDown.bind(this)}
+            onChange={this.handleChange.bind(this)}
+            style={{width: '100%'}}
           />
         </div>
       )
@@ -241,20 +289,10 @@ class Testing extends React.Component {
       <input id="streaming"
         checked={this.state.logStreaming}
         disabled={this.state.testing}
+        onChange={this.handleEmpty.bind(this)}
         type="checkbox" name="public" />
       <label htmlFor="streaming">Console Log Streaming</label>
       </div>
-      <br/>
-      <br/>
-      <div className="ui toggle checkbox"
-        onChange={this.toggleCliTernimal.bind(this)}
-      >
-      <input id="cliTerminal"
-        checked={this.state.cliTerminal}
-        type="checkbox" name="public" />
-      <label htmlFor="cliTerminal">Launch CLI Terminal</label>
-      </div>
-
       <br/>
       <br/>
       <div>Select a CLI-commands script:</div>

@@ -5,8 +5,8 @@ var fs                 = require('fs'),
     path               = require('path'),
     Logger             = require('../Logger.js'),
     Utilities          = require('../Utilities.js'),
-    ZCLAttributeInfo   = require('../ZCLAttributeInfo'),
-    ZCLDataTypes       = require('../ZCLDataTypes.js'),
+    ZCLAttributeInfo   = require('../zcl-definitions/ZCLAttributeInfo.js'),
+    ZCLDataTypes       = require('../zcl-definitions/ZCLDataTypes.js'),
     Constants          = require('../Constants.js'),
     _                  = require('underscore');
 
@@ -128,35 +128,50 @@ var GatewayInterfaceSend = {
     Enables zigbee permit joining for time joinMs
   */
   zigbeePermitJoinMs: function(joinMs) {
+    var hexJoinMs = '0x' + parseInt(joinMs, 10).toString(16);
     GatewayInterfaceSend.publishCommandList([
-      {command: 'network broad-pjoin ' + joinMs, postDelayMs: 100},
+      {command: 'network broad-pjoin ' + hexJoinMs, postDelayMs: 100},
     ]);
   },
 
   /*
     Enable zigbee3.0 device joining for time joinMs
   */
-  zigbee3PermitJoinMs: function(deviceEui, linkKey)  {
-    GatewayInterfaceSend.publishCommandList([
-      {command: 'plugin network-creator-security set-joining-link-key {' + deviceEui + '} {' + linkKey + '}', postDelayMs:100},
-      {command: 'plugin network-creator-security open-network', postDelayMs: 100}
-    ]);
+  zigbee3PermitJoinMs: function(deviceEui, linkKey, reopen) {
+    if(!reopen) {
+      GatewayInterfaceSend.publishCommandList([
+        {command: 'plugin network-creator-security clear-joining-link-keys'},
+        {command: 'plugin network-creator-security set-joining-link-key {' + deviceEui + '} {' + linkKey + '}', postDelayMs:100},
+        {command: 'plugin network-creator-security open-network', postDelayMs: 100}
+      ]);
+    } else {
+      GatewayInterfaceSend.publishCommandList([
+        {command: 'plugin network-creator-security set-joining-link-key {' + deviceEui + '} {' + linkKey + '}', postDelayMs:100},
+        {command: 'plugin network-creator-security open-network', postDelayMs: 100}
+      ]);
+    }
   },
 
   /*
     Enable zigbee3.0 device joining for time joinMs and install code only
   */
-  zigbee3PermitJoinMsInstallCode: function(deviceEui, linkKey)  {
-    GatewayInterfaceSend.publishCommandList([
-      {command: 'plugin network-creator-security clear-joining-link-keys'},
-      {command: 'plugin network-creator-security open-with-key {' + deviceEui + '} {' + linkKey + '}', postDelayMs: 100}
-    ]);
+  zigbee3PermitJoinMsInstallCode: function(deviceEui, linkKey, reopen) {
+    if(!reopen) {
+      GatewayInterfaceSend.publishCommandList([
+        {command: 'plugin network-creator-security clear-joining-link-keys'},
+        {command: 'plugin network-creator-security open-with-key {' + deviceEui + '} {' + linkKey + '}', postDelayMs: 100}
+      ]);
+    } else {
+      GatewayInterfaceSend.publishCommandList([
+        {command: 'plugin network-creator-security open-with-key {' + deviceEui + '} {' + linkKey + '}', postDelayMs: 100}
+      ]);
+    }
   },
 
   /*
     Enable zigbee3.0 device for time joinMs and only open-network
   */
-  zigbee3PermitJoinMsOpenNetworkOnly: function()  {
+  zigbee3PermitJoinMsOpenNetworkOnly: function() {
     GatewayInterfaceSend.publishCommandList([
       {command: 'plugin network-creator-security open-network', postDelayMs: 100}
     ]);
@@ -167,7 +182,7 @@ var GatewayInterfaceSend = {
   */
   zigbeePermitJoinOff: function() {
     GatewayInterfaceSend.publishCommandList([
-      {command: 'network broad-pjoin 0'},
+      {command: 'network broad-pjoin 0x0'},
     ]);
   },
 
@@ -187,11 +202,11 @@ var GatewayInterfaceSend = {
   */
   zigbeeAddRule: function(inDeviceInfo, outDeviceInfo) {
     var inEui = '{' + inDeviceInfo.deviceEndpoint.eui64.replace('0x', '') + '}';
-    var inEndpoint = inDeviceInfo.deviceEndpoint.endpoint;
+    var inEndpoint = '0x' + parseInt(inDeviceInfo.deviceEndpoint.endpoint, 10).toString(16);
     var inClusterId = inDeviceInfo.deviceEndpoint.clusterId;
 
     var outEui =  '{' + outDeviceInfo.deviceEndpoint.eui64.replace('0x', '') + '}';
-    var outEndpoint = outDeviceInfo.deviceEndpoint.endpoint;
+    var outEndpoint = '0x' + parseInt(outDeviceInfo.deviceEndpoint.endpoint, 10).toString(16);
     var outClusterId = outDeviceInfo.deviceEndpoint.clusterId;
 
     GatewayInterfaceSend.publishCommandList([
@@ -207,11 +222,11 @@ var GatewayInterfaceSend = {
   */
   zigbeeDeleteRule: function(inDeviceInfo, outDeviceInfo) {
     var inEui = '{' + inDeviceInfo.deviceEndpoint.eui64.replace('0x', '') + '}';
-    var inEndpoint = inDeviceInfo.deviceEndpoint.endpoint;
+    var inEndpoint = '0x' + parseInt(inDeviceInfo.deviceEndpoint.endpoint, 10).toString(16);
     var inClusterId = inDeviceInfo.deviceEndpoint.clusterId;
 
     var outEui =  '{' + outDeviceInfo.deviceEndpoint.eui64.replace('0x', '') + '}';
-    var outEndpoint = outDeviceInfo.deviceEndpoint.endpoint;
+    var outEndpoint = '0x' + parseInt(outDeviceInfo.deviceEndpoint.endpoint, 10).toString(16);
     var outClusterId = outDeviceInfo.deviceEndpoint.clusterId;
 
     GatewayInterfaceSend.publishCommandList([
@@ -243,18 +258,6 @@ var GatewayInterfaceSend = {
   },
 
   /*
-    Send a reform network command to the gateway
-  */
-  zigbeeReformNetwork: function(chan, power, pan) {
-    this.zigbeeClearEntries();
-    GatewayInterfaceSend.publishCommandList([
-      {command: 'network leave', postDelayMs: 1000},
-      {command: 'network form ' + chan + ' ' + power + ' ' + '0x' + pan, postDelayMs: 1000},
-      {command: 'network broad-pjoin 0'}
-    ]);
-  },
-
-  /*
     Send a simple reform ZB3.0 network command to the gateway.
     The command would search for a clean channel.
   */
@@ -262,7 +265,7 @@ var GatewayInterfaceSend = {
     this.zigbeeClearEntries();
     GatewayInterfaceSend.publishCommandList([
       {command: 'network leave', postDelayMs: 1000},
-      {command: 'plugin network-creator start ' + Constants.CENTRALIZED_SECURITY},
+      {command: 'plugin network-creator start ' + '0x' + Constants.CENTRALIZED_SECURITY},
     ]);
   },
 
@@ -270,11 +273,14 @@ var GatewayInterfaceSend = {
     Send a reform ZB3.0 network command to the gateway
   */
   zigbee3ReformNetwork: function(chan, power, pan) {
+    var hexChan = '0x' + parseInt(chan, 10).toString(16);
+    var hexPower = parseInt(power, 10).toString(16);
+    var hexPan = '0x' + pan;
     this.zigbeeClearEntries();
     GatewayInterfaceSend.publishCommandList([
       {command: 'network leave', postDelayMs: 1000},
-      {command: 'plugin network-creator form ' + Constants.CENTRALIZED_SECURITY +
-        ' ' + '0x' + pan + ' ' + power + ' ' + chan},
+      {command: 'plugin network-creator form ' + '0x' + Constants.CENTRALIZED_SECURITY +
+        ' ' + hexPan + ' ' + hexPower + ' ' + hexChan},
     ]);
   },
 
@@ -297,19 +303,21 @@ var GatewayInterfaceSend = {
       var commandlist = [];
       deviceEndpoint.forEach(function(devEndpoint) {
         var eui64String = '{' + devEndpoint.eui64.replace('0x', '') + '}';
+        var hexEndpoint = '0x' + parseInt(devEndpoint.endpoint, 10).toString(16);
 
-        commandlist.push({command:"zcl on-off toggle"})
+        commandlist.push({command:'zcl on-off toggle'})
         commandlist.push({command: 'plugin device-table send ' + eui64String +
-          ' ' + devEndpoint.endpoint})
+          ' ' + hexEndpoint})
       });
       GatewayInterfaceSend.publishCommandList(commandlist);
     } else {
       var eui64String = '{' + deviceEndpoint.eui64.replace('0x', '') + '}';
+      var hexEndpoint = '0x' + parseInt(deviceEndpoint.endpoint, 10).toString(16);
 
       GatewayInterfaceSend.publishCommandList([
         {command: 'zcl on-off toggle'},
         {command: 'plugin device-table send ' + eui64String + ' ' +
-          deviceEndpoint.endpoint},
+          hexEndpoint},
       ]);
     }
   },
@@ -322,18 +330,20 @@ var GatewayInterfaceSend = {
       var commandlist = []
       deviceEndpoint.forEach(function(devEndpoint) {
         var eui64String = '{' + devEndpoint.eui64.replace('0x', '') + '}';
+        var hexEndpoint = '0x' + parseInt(devEndpoint.endpoint, 10).toString(16);
 
-        commandlist.push({command:"zcl on-off off"})
+        commandlist.push({command:'zcl on-off off'})
         commandlist.push({command: 'plugin device-table send ' + eui64String +
-          ' ' + devEndpoint.endpoint})
+          ' ' + hexEndpoint})
       });
       GatewayInterfaceSend.publishCommandList(commandlist);
     } else {
       var eui64String = '{' + deviceEndpoint.eui64.replace('0x', '') + '}';
+      var hexEndpoint = '0x' + parseInt(deviceEndpoint.endpoint, 10).toString(16);
 
       GatewayInterfaceSend.publishCommandList([
         {command: 'zcl on-off off'},
-        {command: 'plugin device-table send ' + eui64String + ' ' + deviceEndpoint.endpoint},
+        {command: 'plugin device-table send ' + eui64String + ' ' + hexEndpoint},
       ]);
     }
   },
@@ -346,19 +356,57 @@ var GatewayInterfaceSend = {
       var commandlist = []
       deviceEndpoint.forEach(function(devEndpoint) {
         var eui64String = '{' + devEndpoint.eui64.replace('0x', '') + '}';
+        var hexEndpoint = '0x' + parseInt(devEndpoint.endpoint, 10).toString(16);
 
-        commandlist.push({command:"zcl on-off on"})
-        commandlist.push({command: 'plugin device-table send  ' + eui64String + ' ' + devEndpoint.endpoint})
+        commandlist.push({command:'zcl on-off on'})
+        commandlist.push({command: 'plugin device-table send  ' + eui64String + ' ' + hexEndpoint})
       });
       GatewayInterfaceSend.publishCommandList(commandlist);
     } else {
       var eui64String = '{' + deviceEndpoint.eui64.replace('0x', '') + '}';
+      var hexEndpoint = '0x' + parseInt(deviceEndpoint.endpoint, 10).toString(16);
 
       GatewayInterfaceSend.publishCommandList([
         {command: 'zcl on-off on'},
-        {command: 'plugin device-table send ' + eui64String + ' ' + deviceEndpoint.endpoint},
+        {command: 'plugin device-table send ' + eui64String + ' ' + hexEndpoint},
       ]);
     }
+  },
+
+  /*
+    Enter identify
+  */
+  zigbeeEnterIdentify: function(deviceEndpoint) {
+    var eui64String = '{' + deviceEndpoint.eui64.replace('0x', '') + '}';
+    var hexEndpoint = '0x' + parseInt(deviceEndpoint.endpoint, 10).toString(16);
+    var hexIdentifyCluster = '0x' + parseInt(Constants.IDENTIFY_CLUSTER, 10).toString(16);
+    var hexIdentifyTimeAttribute = '0x' + parseInt(Constants.IDENTIFY_TIME_ATTRIBUTE, 10).toString(16);
+
+    // Trigger 3-minutes Identify.
+    GatewayInterfaceSend.publishCommandList([
+      {command: 'zcl global direction 0x0'},
+      {command: 'zcl global write ' + hexIdentifyCluster + ' ' + hexIdentifyTimeAttribute +
+                ' ' + '0x21 {B4 00}', postDelayMs: 100},
+      {command: 'plugin device-table send ' + eui64String + ' ' + hexEndpoint},
+    ]);
+  },
+
+  /*
+    Exit identify
+  */
+  zigbeeExitIdentify: function(deviceEndpoint) {
+    var eui64String = '{' + deviceEndpoint.eui64.replace('0x', '') + '}';
+    var hexEndpoint = '0x' + parseInt(deviceEndpoint.endpoint, 10).toString(16);
+    var hexIdentifyCluster = '0x' + parseInt(Constants.IDENTIFY_CLUSTER, 10).toString(16);
+    var hexIdentifyTimeAttribute = '0x' + parseInt(Constants.IDENTIFY_TIME_ATTRIBUTE, 10).toString(16);
+
+    // Trigger 3-minute Identify.
+    GatewayInterfaceSend.publishCommandList([
+      {command: 'zcl global direction 0x0'},
+      {command: 'zcl global write ' + hexIdentifyCluster + ' ' + hexIdentifyTimeAttribute +
+                ' ' + '0x21 {00 00}', postDelayMs: 100},
+      {command: 'plugin device-table send ' + eui64String + ' ' + hexEndpoint},
+    ]);
   },
 
   /*
@@ -369,17 +417,21 @@ var GatewayInterfaceSend = {
       var commandlist = []
       deviceEndpoint.forEach(function(devEndpoint) {
         var eui64String = '{' + devEndpoint.eui64.replace('0x', '') + '}';
+        var hexEndpoint = '0x' + parseInt(devEndpoint.endpoint, 10).toString(16);
+        var hexLevel = '0x' + parseInt(level, 10).toString(16);
 
-        commandlist.push({command:'zcl level-control o-mv-to-level ' + level + ' 1'})
-        commandlist.push({command: 'plugin device-table send  ' + eui64String + ' ' + devEndpoint.endpoint})
+        commandlist.push({command:'zcl level-control o-mv-to-level ' + hexLevel + ' 0x1'})
+        commandlist.push({command: 'plugin device-table send  ' + eui64String + ' ' + hexEndpoint})
       });
       GatewayInterfaceSend.publishCommandList(commandlist);
     } else {
       var eui64String = '{' + deviceEndpoint.eui64.replace('0x', '') + '}';
+      var hexEndpoint = '0x' + parseInt(deviceEndpoint.endpoint, 10).toString(16);
+      var hexLevel = '0x' + parseInt(level, 10).toString(16);
 
       GatewayInterfaceSend.publishCommandList([
-        {command: 'zcl level-control o-mv-to-level ' + level + ' 1'},
-        {command: 'plugin device-table send ' + eui64String + ' ' + deviceEndpoint.endpoint},
+        {command: 'zcl level-control o-mv-to-level ' + hexLevel + ' 0x1'},
+        {command: 'plugin device-table send ' + eui64String + ' ' + hexEndpoint},
       ]);
     }
   },
@@ -392,17 +444,21 @@ var GatewayInterfaceSend = {
       var commandlist = []
       deviceEndpoint.forEach(function(devEndpoint) {
         var eui64String = '{' + devEndpoint.eui64.replace('0x', '') + '}';
+        var hexEndpoint = '0x' + parseInt(devEndpoint.endpoint, 10).toString(16);
+        var hexColorTemp = '0x' + parseInt(colorTemp, 10).toString(16);
 
-        commandlist.push({command:'zcl color-control movetocolortemp ' + colorTemp + ' 1'})
-        commandlist.push({command: 'plugin device-table send  ' + eui64String + ' ' + devEndpoint.endpoint})
+        commandlist.push({command:'zcl color-control movetocolortemp ' + hexColorTemp + ' 0x1'})
+        commandlist.push({command: 'plugin device-table send  ' + eui64String + ' ' + hexEndpoint})
       });
       GatewayInterfaceSend.publishCommandList(commandlist);
     } else {
       var eui64String = '{' + deviceEndpoint.eui64.replace('0x', '') + '}';
+      var hexEndpoint = '0x' + parseInt(deviceEndpoint.endpoint, 10).toString(16);
+      var hexColorTemp = '0x' + parseInt(colorTemp, 10).toString(16);
 
       GatewayInterfaceSend.publishCommandList([
-        {command: 'zcl color-control movetocolortemp ' + colorTemp + ' 1'},
-        {command: 'plugin device-table send ' + eui64String + ' ' + deviceEndpoint.endpoint},
+        {command: 'zcl color-control movetocolortemp ' + hexColorTemp + ' 0x1'},
+        {command: 'plugin device-table send ' + eui64String + ' ' + hexEndpoint},
       ]);
     }
   },
@@ -415,17 +471,23 @@ var GatewayInterfaceSend = {
       var commandlist = []
       deviceEndpoint.forEach(function(devEndpoint) {
         var eui64String = '{' + devEndpoint.eui64.replace('0x', '') + '}';
+        var hexEndpoint = '0x' + parseInt(devEndpoint.endpoint, 10).toString(16);
+        var hexHue = '0x' + Math.floor((hue * 254) / 356).toString(16);
+        var hexSat = '0x' + Math.floor((sat * 254) / 100).toString(16);
 
-        commandlist.push({command:'zcl color-control movetohueandsat ' + Math.floor((hue * 254) / 356) + ' ' + Math.floor((sat * 254) / 100) + ' 1'})
-        commandlist.push({command: 'plugin device-table send  ' + eui64String + ' ' + devEndpoint.endpoint})
+        commandlist.push({command:'zcl color-control movetohueandsat ' + hexHue + ' ' + hexSat + ' 0x1'})
+        commandlist.push({command: 'plugin device-table send  ' + eui64String + ' ' + hexEndpoint})
       });
       GatewayInterfaceSend.publishCommandList(commandlist);
     } else {
       var eui64String = '{' + deviceEndpoint.eui64.replace('0x', '') + '}';
+      var hexEndpoint = '0x' + parseInt(deviceEndpoint.endpoint, 10).toString(16);
+      var hexHue = '0x' + Math.floor((hue * 254) / 356).toString(16);
+      var hexSat = '0x' + Math.floor((sat * 254) / 100).toString(16);
 
       GatewayInterfaceSend.publishCommandList([
-        {command: 'zcl color-control movetohueandsat ' + Math.floor((hue * 254) / 356) + ' ' + Math.floor((sat * 254) / 100) + ' 1'},
-        {command: 'plugin device-table send ' + eui64String + ' ' + deviceEndpoint.endpoint},
+        {command: 'zcl color-control movetohueandsat ' + hexHue + ' ' + hexSat + ' 0x1'},
+        {command: 'plugin device-table send ' + eui64String + ' ' + hexEndpoint},
       ]);
     }
   },
@@ -434,32 +496,32 @@ var GatewayInterfaceSend = {
     Requests an cluster/attribute from a zigbee node or gateway
   */
   zigbeeRequestAttribute: function(deviceEndpoint, friendlyZigbeeAttribute) {
-    var clusterString = ZCLAttributeInfo[friendlyZigbeeAttribute].clusterID;
-    var attributeString = ZCLAttributeInfo[friendlyZigbeeAttribute].attributeID;
+    var clusterString = '0x' + ZCLAttributeInfo[friendlyZigbeeAttribute].clusterID.toString(16);
+    var attributeString = '0x' + ZCLAttributeInfo[friendlyZigbeeAttribute].attributeID.toString(16);
     var eui64String = '{' + deviceEndpoint.eui64.replace('0x', '') + '}';
+    var hexEndpoint = '0x' + parseInt(deviceEndpoint.endpoint, 10).toString(16);
 
     if (friendlyZigbeeAttribute === 'firmwareVersion' ||
       friendlyZigbeeAttribute === 'imageTypeId' ||
       friendlyZigbeeAttribute === 'manufacturerId') {
 
       var commandList = [
-        {command: 'zcl global direction 1'},
+        {command: 'zcl global direction 0x1'},
         {command: 'zcl global read ' + clusterString + ' ' + attributeString},
-        {command: 'plugin device-table send ' + eui64String + ' ' + deviceEndpoint.endpoint},
-        {command: 'zcl global direction 0'},
+        {command: 'plugin device-table send ' + eui64String + ' ' + hexEndpoint},
       ];
     } else {
       var commandList = [
-        {command: 'zcl global direction 0'},
+        {command: 'zcl global direction 0x0'},
         {command: 'zcl global read ' + clusterString + ' ' + attributeString},
-        {command: 'plugin device-table send ' + eui64String + ' ' + deviceEndpoint.endpoint},
+        {command: 'plugin device-table send ' + eui64String + ' ' + hexEndpoint},
       ];
     }
 
     GatewayInterfaceSend.publishCommandListThrottled(commandList);
 
     Logger.server.info('Global Read Requesting Global Cluster: '
-      +  clusterString + ' Attrib: ' + attributeString
+      +  clusterString + ' Attribute: ' + attributeString
       + ' deviceEndpoint: ' + deviceEndpoint);
   },
 
@@ -505,7 +567,7 @@ var GatewayInterfaceSend = {
     }
 
     GatewayInterfaceSend.publishCommandList([
-      {command: 'plugin ota-server policy query ' + upgrade, postDelayMs: 100},
+      {command: 'plugin ota-server policy query ' + '0x' + upgrade, postDelayMs: 100},
     ]);
   },
 
@@ -522,7 +584,7 @@ var GatewayInterfaceSend = {
     }
 
     GatewayInterfaceSend.publishCommandList([
-      {command: 'plugin ota-server notify ' + nodeId + ' 1 3 127 ' +
+      {command: 'plugin ota-server notify ' + nodeId + ' 0x1 0x3 0x7F ' +
         manufacturerId + ' ' + imageTypeId + ' ' + firmwareVersion
         , postDelayMs: 100},
     ]);
@@ -567,10 +629,11 @@ var GatewayInterfaceSend = {
     ' ' + datatypeHexString + ' ' + minTimeHexString + ' ' + maxTimeHexString + ' ' + reportableString;
 
     var eui64String = '{' + deviceEndpoint.eui64.replace('0x', '') + '}';
+    var hexEndpoint = '0x' + parseInt(deviceEndpoint.endpoint, 10).toString(16);
 
     GatewayInterfaceSend.publishCommandListThrottled([
       {command: reportCommandString},
-      {command: 'plugin device-table send ' + eui64String + ' ' + deviceEndpoint.endpoint, postDelayMs: Constants.REPORTING_POST_DELAY},
+      {command: 'plugin device-table send ' + eui64String + ' ' + hexEndpoint, postDelayMs: Constants.REPORTING_POST_DELAY},
     ]);
 
     Logger.server.info('Set up reporting.' + 'Attribute: ' + friendlyZigbeeAttribute + ' deviceEndpoint: ' + deviceEndpoint
@@ -591,11 +654,12 @@ var GatewayInterfaceSend = {
     }
 
     var eui64String = '{' + deviceEndpoint.eui64.replace('0x', '') + '}';
-    var bindCommandString = 'zdo bind ' + nodeId + ' 1 1 ' + clusterHexString + ' ' + eui64String + ' {' + gatewayEui + '}';
+    var hexEndpoint = '0x' + parseInt(deviceEndpoint.endpoint, 10).toString(16);
+    var bindCommandString = 'zdo bind ' + nodeId + ' 0x1 0x1 ' + clusterHexString + ' ' + eui64String + ' {' + gatewayEui + '}';
 
     GatewayInterfaceSend.publishCommandListThrottled([
       {command: bindCommandString},
-      {command: 'plugin device-table send ' + eui64String + ' ' + deviceEndpoint.endpoint, postDelayMs: Constants.BIND_POST_DELAY},
+      {command: 'plugin device-table send ' + eui64String + ' ' + hexEndpoint, postDelayMs: Constants.BIND_POST_DELAY},
     ]);
 
     Logger.server.info('Set up bind entry: DeviceTable: ' + deviceEndpoint  + ' Cluster: ' + clusterHexString);
@@ -673,6 +737,13 @@ var SocketInterfaceSend = {
   */
   publishDeviceUpdateToClients: function(message) {
     SocketInterfaceSend.sendToAllClientsOnChannel('deviceupdate', message);
+  },
+
+  /*
+    Sends the raw ota message to all clients
+  */
+  publishOtaEventsToClients: function(message) {
+    SocketInterfaceSend.sendToAllClientsOnChannel('otaevents', message);
   },
 
   /*

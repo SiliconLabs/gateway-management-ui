@@ -1,19 +1,21 @@
+// Copyright 2017 Silicon Laboratories, Inc.
+
 var ip               = require('ip'),
   path               = require('path'),
   _                  = require('underscore'),
   fs                 = require('fs-extra'),
-  ServerActions      = require('../actions/ServerActions.js'),
-  ota                = require('../OverTheAirUpdate.js'),
-  Logger             = require('../Logger.js'),
-  CustomerTest       = require('../CustomerTest.js'),
-  RulesEngine        = require('../RulesEngine.js'),
-  ZB3KeyManagement   = require('../ZB3KeyManagement.js'),
-  DeviceDBManagement = require('./DeviceDBManagement.js'),
   Constants          = require('../Constants.js'),
   Config             = require('../Config.js'),
   Utilities          = require('../Utilities.js'),
-  ZCLDataTypes       = require('../ZCLDataTypes.js'),
-  ZCLAttributeNames  = require('../ZCLAttributeNames.js').ZCLAttributeNames;
+  ServerActions      = require('../actions/ServerActions.js'),
+  ota                = require('./sub-modules/OverTheAirUpdate.js'),
+  Logger             = require('../Logger.js'),
+  CustomerTest       = require('../CustomerTest.js'),
+  RulesEngine        = require('./sub-modules/RulesEngine.js'),
+  DeviceDBManagement = require('./DeviceDBManagement.js'),
+  ZCLDataTypes       = require('../zcl-definitions/ZCLDataTypes.js'),
+  ZCLResponseActions = require('./ZCLResponseActions.js'),
+  ZCLAttributeNames  = require('../zcl-definitions/ZCLAttributeNames.js').ZCLAttributeNames;
 
 var gatewayStorePath = path.join(__dirname, Constants.gatewayStore);
 
@@ -28,49 +30,166 @@ var DeviceController = {
     'testNumber': 1
   },
 
+  // Mirror of local relaylist
+  relayList: [],
+  // Cloud group list
+  groups: [],
+  // Settings
+  settings: {},
   // Gateway Settings
   gatewaySettings: {
     'trafficReporting': false
   },
-
-  // Cloud group list
-  groups: [],
-
-  // Gateway Eui
-  gatewayEui: '',
-
-  currentGroupNum: 1,
-
   // Cloud network state
   gatewayNetworkState: {
     'networkUp': null,
   },
-
-  // gatewaySettings
-  settings: {},
-
-  // Mirror of local relaylist
-  relayList: [],
-
-  missingHeartbeat: {},
-
-  validateNetworkReformCountDown: false,
-
-  simpleRefromZB3NetworkTriggered: false,
-
-  currentTest: null,
-
-  rulesEngine: new RulesEngine(),
-
-  zb3KeyManagement: new ZB3KeyManagement(),
-
   // List of known ZigBee gateways
   gatewayList: {},
-
   // Ota Timeout
   missingOtaBlockSent: {},
-
+  missingHeartbeat: {},
+  gatewayEui: '',
+  currentTest: null,
+  currentGroupNum: 1,
+  heartbeatUpCount: 0,
   currentOtaUpdatingDevice: '',
+  validateNetworkReformCountDown: false,
+  simpleRefromZB3NetworkTriggered: false,
+
+  rulesEngine: new RulesEngine(),
+  zb3KeyManagement: DeviceDBManagement.zb3KeyManagement,
+
+  /* This event is fired when a device sends a new attribute
+  mqtt message format:
+  {
+    "clusterId":"0x0406",
+    "attributeId":"0x0000",
+    "attributeBuffer":"0x01",
+    "attributeDataType":"0x18",
+    "deviceEndpoint":{
+      "eui64":"0x000B57FFFE1938F0",
+      "endpoint":1
+    }
+  }
+  */
+  onZCLResponse: function(messagePayload) {
+    if (messagePayload.commandId) {
+      DeviceController.onCommand(messagePayload);
+    } else {
+      DeviceController.onAttributeUpdate(messagePayload);
+    }
+    DeviceController.onZCLRuleMessage(messagePayload);
+  },
+
+  /* This event is fired when a device sends a command
+  mqtt message format:
+  {
+    clusterId: "clusterIdString",
+    commandId: "hexBuffer",
+    commandData: "hexBuffer",
+    nodeId: "nodeIDString",
+    nodeEui: "nodeEuiString",
+  }
+  */
+  onCommand: function(messageParsed) {
+    var globalItem = DeviceDBManagement.devices[DeviceDBManagement.getHash(messageParsed.deviceEndpoint)]
+
+    // If global item does not exist
+    if (!globalItem) return;
+
+    // Determine action
+    if (messageParsed.clusterId == Constants.IAS_ZONE_CLUSTER) {
+      if (messageParsed.commandId == Constants.ZONE_STATUS_CHANGE_NOTIFICATION_COMMAND_ID) {
+        // Get Character 0x0<o>00 0000 0000 from hex string
+        var zoneStatusNibble = messageParsed.commandData[3];
+        globalItem.tamperState = zoneStatusNibble & 4;
+        globalItem.contactState = zoneStatusNibble & 1;
+        Logger.server.info('DeviceController: ZoneStatusChangeCommandSuccess: contactState: ' + globalItem.contactState
+                            + ' tamperState: ' + globalItem.tamperState);
+        ServerActions.SocketInterface.publishDeviceUpdateToClients(globalItem);
+      }
+    }
+  },
+
+  /* This event is fired when a device sends a new attribute
+  mqtt message format:
+  {
+    clusterId: "clusterIdString",
+    attributeId: "attributeIdString",
+    attributeBuffer: "hexBuffer",
+    attributeDataType: <dataTypeInt>,
+    nodeId: "nodeIDString",
+    nodeEui: "nodeEuiString",
+    returnStatus: <0 or 1>,
+  }
+  */
+
+  // This is called when a node's unique camel case attribute 'tag' is read
+  onAttributeUpdate: function(messageParsed) {
+    var globalItem = DeviceDBManagement.devices[DeviceDBManagement.getHash(messageParsed.deviceEndpoint)]
+
+    // Read property
+    var property = friendlyParameterName(messageParsed.clusterId, messageParsed.attributeId);
+
+    // Can't find property
+    if (property ===  undefined) {
+      Logger.server.info('DeviceController: AttributeUpdateFailed: Cant find property');
+      return;
+    }
+
+    // Parse buffer and return value string
+    try {
+      var value = zclParseBufferRaw(messageParsed.attributeDataType, messageParsed.attributeBuffer);
+    } catch (e) {
+      Logger.server.info('DeviceController: AttributeUpdateFailed: Exception parsing value: ' + e.toString());
+      return;
+    }
+
+    var convertedValue = formatAndAssignValue(globalItem, property, value, messageParsed.status);
+
+    Logger.server.info('DeviceController: AttributeUpdateSuccess: Property: ' + property +
+                        ' Value:' + value + ' Converted: ' + convertedValue);
+
+    ServerActions.SocketInterface.publishDeviceUpdateToClients(globalItem);
+  },
+
+  /*
+  This is called when an Over-The-Air upgrade event occurs on a node
+    otaFinished
+    otaBlockSent
+    otaStarted
+    otaFailed
+
+  {
+    messageType: "<otaTypeString>",
+    nodeId: "nodeIDString",
+    nodeEui: "nodeEuiString",
+    returnStatus: <0 or 1>,         //optional
+    blocksSent: <numberOfBlocks>,   //optional
+    blockSize: <sizeOfBlocksInBytes>, //optional
+    manufacturerId: "%04String",  //optional
+    imageTypeId: "%04String", //optional
+    firmwareVersion: "%08String" //optional
+  }
+  */
+
+  /*
+    {"messageType":"otaBlockSent",
+    "eui64":"0x000B57FFFE0977E1",
+    "bytesSent":177975,
+    "manufacturerId":"0x1002",
+    "imageTypeId":"0xA002",
+    "firmwareVersion":"0x00000002"}
+  */
+
+  onOtaEvent: function(messageParsed) {
+    _.each(DeviceDBManagement.devices, function(value, key, list) {
+      if (key.split('-')[0] == messageParsed.eui64) {
+        this.updateDeviceFromOTA(value, messageParsed);
+      }
+    }.bind(this));
+  },
 
   onZCLRuleMessage: function(messagePayload) {
     if (messagePayload.commandId) {
@@ -102,96 +221,6 @@ var DeviceController = {
       this.rulesEngine.onZCLAttribute(clusterId, attributeId, value, sourceEndpoint);
     }
   },
-  /* This event is fired when a device sends a new attribute
-  mqtt message format:
-  {
-    "clusterId":"0x0406",
-    "attributeId":"0x0000",
-    "attributeBuffer":"0x01",
-    "attributeDataType":"0x18",
-    "deviceEndpoint":{
-      "eui64":"0x000B57FFFE1938F0",
-      "endpoint":1
-    }
-  }
-  */
-
-  onZCLResponse: function(messagePayload) {
-    if (messagePayload.commandId) {
-      DeviceController.onCommand(messagePayload);
-    } else {
-      DeviceController.onAttributeUpdate(messagePayload);
-    }
-
-    DeviceController.onZCLRuleMessage(messagePayload);
-  },
-
-  setLogStreaming: function(value) {
-    this.serverSettings.logStreaming = value;
-    Logger.logStreaming = value;
-  },
-
-  setOtaInProgress: function(value) {
-    this.serverSettings.otaInProgress = value;
-  },
-
-  getServerSettings: function(callback) {
-    // Refresh IP Address
-    this.serverSettings.ip = ip.address();
-    callback(this.serverSettings);
-  },
-
-  sendServerSettings: function() {
-    // Refresh IP Address
-    this.serverSettings.ip = ip.address();
-    ServerActions.SocketInterface.sendServerSettings(this.serverSettings);
-  },
-
-  sendHeartbeat: function() {
-    ServerActions.SocketInterface.publishHeartbeatToClients(this.gatewayNetworkState);
-  },
-
-  sendNetworkSecurityLevel: function(securityLevel) {
-    ServerActions.SocketInterface.publishNetworkSecurityLevelToClients(securityLevel)
-  },
-
-  sendNetworkSecurityLevel: function(message) {
-    ServerActions.SocketInterface.publishNetworkSecurityLevelToClients(message);
-  },
-
-  syncCloudNetworkSecurityLevelWithLocalCopy: function(securityLevelFromCloud) {
-    this.gatewayList[this.gatewayEui].networkSecurityLevel = securityLevelFromCloud;
-    fs.writeFileSync(gatewayStorePath, JSON.stringify(this.gatewayList));
-  },
-
-  setGatewayCurrentGatewayEui: function(gatewayEui) {
-    this.gatewayEui = gatewayEui;
-    ServerActions.GatewayInterface.currentGatewayEui = gatewayEui;
-  },
-
-  setGatewayNetworkState: function(state) {
-    this.gatewayNetworkState = state;
-  },
-
-  sendCloudStateToClients: function() {
-    // Cloud device state
-    var cloudState = {
-      devices: {},
-      groups: [],
-      cloudRules: [],
-      gatewayEui: ''
-    };
-
-    // Refresh Cloud State
-    cloudState.devices = _.values(DeviceDBManagement.devices);
-    cloudState.groups = this.groups;
-    cloudState.gatewayEui = this.gatewayEui;
-    cloudState.cloudRules = this.rulesEngine.getRulesArray();
-
-    this.sendServerSettings();
-    ServerActions.SocketInterface.publishDeviceStateToClients(cloudState);
-    ServerActions.SocketInterface.publishRulesStateSocketMessage(this.relayList);
-  },
 
   onMessageExecuted: function(data) {
     // Send to clients
@@ -205,32 +234,131 @@ var DeviceController = {
     ServerActions.SocketInterface.publishGatewayInfoMessageToClients(messageParsed);
   },
 
-  requestGatewayState: function() {
-    ServerActions.GatewayInterface.requestState();
+  onTrafficTestResults: function(messageParsed) {
+    // On test finish wait 3 seconds and report results.
+    setTimeout(function() {
+      this.serverSettings.customerTesting = false;
+
+      if (this.currentTest !== null) {
+        this.currentTest.setLegacy(messageParsed);
+        this.currentTest.processBuildDefault();
+        ServerActions.GatewayInterface.gatewaySetAttribute('trafficReporting', false);
+        ServerActions.GatewayInterface.requestState();
+      } else {
+        Logger.server.log('error', 'Current test is null');
+      }
+      Logger.server.log('info', 'Testing Results: ' + JSON.stringify(messageParsed));
+      ServerActions.SocketInterface.sendTrafficTestResults(messageParsed);
+    }.bind(this), Constants.TEST_MESSAGE_IN_FLIGHT_TIMEOUT);
   },
 
-  startTrafficTest: function(deviceEndpoint, period, iterations, nodeId, deviceType) {
-    Logger.server.log('info', 'Starting Customer Test... ');
+  onTestEvent: function(messageParsed) {
+    if (this.currentTest !== null) {
+      if (Config.CLOUD_ENABLED) {
+        Logger.server.log('info', 'Cloud enabled, Test functions disabled');
+        return;
+      }
+      this.currentTest.handleTestMessage(messageParsed);
+    } else {
+      Logger.server.log('error', 'Current test is null');
+    }
+  },
 
-    if (this.serverSettings.customerTesting) {
-      Logger.server.log('info', 'Already Testing. Restarting. ');
+  onRelayList: function(messageParsed) {
+    this.relayList = messageParsed;
+    this.sendCloudStateToClients();
+  },
+
+  onHeartbeat: function(messageParsed, gatewayEui) {
+    clearTimeout(this.missingHeartbeat);
+    var randomPanValue = Math.floor(Math.random() * (65535)) + 1;
+
+    var currentGateway = {
+      gatewayEui: this.gatewayEui,
+      pan: Utilities.formatNumberToHexString(randomPanValue, 4).slice(-4),
+      chan: '14',
+      pow: '-2',
+      netstat: messageParsed.networkUp
+    };
+
+    // If gateway does not exist, reform the network
+    if (!this.gatewayList[this.gatewayEui]) {
+      Logger.server.log('info', 'in Heartbeat: Gateway not found in Store.');
+
+      // Add the current gateway to the dictionary, write to store, and reform
+      this.gatewayList[this.gatewayEui] = currentGateway;
+      fs.writeFileSync(gatewayStorePath, JSON.stringify(this.gatewayList));
+      // zigbee3ReformNetwork takes channel string, pow string, pan string (without 0x)
+      ServerActions.GatewayInterface.zigbee3ReformNetwork(currentGateway.chan,
+                                                          currentGateway.pow,
+                                                          currentGateway.pan);
+      // Set the default networkSecurityLevel as 'Z3'.
+      currentGateway.networkSecurityLevel = 'Z3';
+      Logger.server.log('info', 'in Heartbeat: Created Random PAN, Saved, and Reformed Network.');
+    } else {
+      // Found gateway information, check if up
+      if (messageParsed.networkUp) {
+        clearTimeout(this.validateNetworkReformCountDown);
+        // Update gateway info to heartbeat information
+        currentGateway.networkPanId = messageParsed.networkPanId;
+        currentGateway.radioTxPower = messageParsed.radioTxPower;
+        currentGateway.radioChannel = messageParsed.radioChannel;
+        if (this.gatewayList[this.gatewayEui].networkSecurityLevel != undefined) {
+          currentGateway.networkSecurityLevel = this.gatewayList[this.gatewayEui].networkSecurityLevel;
+        }
+        this.gatewayList[this.gatewayEui] = currentGateway;
+
+        if (this.heartbeatUpCount === 0) {
+          this.heartbeatUpCount++;
+          Logger.server.log('info', 'Heartbeat Up: ' + JSON.stringify(messageParsed));
+          fs.writeFileSync(gatewayStorePath, JSON.stringify(this.gatewayList));
+        } else if (this.heartbeatUpCount === 1) {
+          this.heartbeatUpCount++;
+          ServerActions.GatewayInterface.requestState();
+        }
+      } else {
+        // Gateway is down
+        Logger.server.log('info', 'in Heartbeat: Gateway found in store and network down.');
+      }
     }
 
-    // Start a test
-    this.currentTest = new CustomerTest(this.serverSettings.testNumber,
-                Logger.testing,
-                period,
-                iterations,
-                nodeId,
-                deviceType);
+    this.setGatewayCurrentGatewayEui(gatewayEui);
+    this.setGatewayNetworkState(messageParsed);
+    this.sendHeartbeat();
+    if (currentGateway.networkSecurityLevel != undefined) {
+        this.sendNetworkSecurityLevel(currentGateway.networkSecurityLevel);
+    }
 
-    this.serverSettings.customerTesting = true;
-    this.setLogStreaming(false);
-    this.serverSettings.testNumber++;
+    this.missingHeartbeat = setTimeout(function() {
+      var missedHeartbeatMessage = {
+        'networkUp': null,
+      };
 
-    ServerActions.GatewayInterface.gatewaySetAttribute('trafficReporting', true);
-    ServerActions.GatewayInterface.zigbeeStartTrafficTest(deviceEndpoint, period, iterations)
-    ServerActions.GatewayInterface.requestState();
+      this.setGatewayNetworkState(missedHeartbeatMessage);
+      this.sendHeartbeat();
+
+      Logger.server.log('info', 'SocketIO Emit: Gateway Down. '
+        + 'Topic: heartbeat \nPayload: '
+        + JSON.stringify(this.gatewayNetworkState));
+
+      // Wait for this heartbeat at 2x the timeout value
+    }.bind(this), Constants.GATEWAY_HEARTBEAT_FREQUENCY_MS * 2);
+
+    if (this.simpleRefromZB3NetworkTriggered) {
+      // Make sure we set the countdown once.
+      this.simpleRefromZB3NetworkTriggered = false;
+      this.validateNetworkReformCountDown = setTimeout(function() {
+        // Add the current gateway to the dictionary, write to store, and reform
+        this.gatewayList[this.gatewayEui] = currentGateway;
+        fs.writeFileSync(gatewayStorePath, JSON.stringify(this.gatewayList));
+        // zigbee3ReformNetwork takes channel string, pow string, pan string (without 0x)
+        ServerActions.GatewayInterface.zigbee3ReformNetwork(currentGateway.chan,
+                                                            currentGateway.pow,
+                                                            currentGateway.pan);
+        // Set the default networkSecurityLevel as 'Z3'.
+        currentGateway.networkSecurityLevel = 'Z3';
+      }.bind(this), Constants.GATEWAY_HEARTBEAT_FREQUENCY_MS * 2);
+    }
   },
 
   /*
@@ -255,6 +383,8 @@ var DeviceController = {
       {"type":"lighttoggle", deviceEndpoint}
       {"type":"lightoff", deviceEndpoint}
       {"type":"lighton", deviceEndpoint}
+      {"type":"enterIdentify", deviceEndpoint}
+      {"type":"exitIdentify", deviceEndpoint}
       {"type":"setlightlevel", deviceEndpoint, level})
       {"type":"setlightcolortemp", deviceEndpoint, colorTemp}
       {"type":"setlighthuesat", deviceEndpoint, hue, sat}
@@ -284,11 +414,13 @@ var DeviceController = {
         var delayMs = messageParsed.delayMs;
 
         this.zb3KeyManagement.startZB3Join(deviceEui, installCode, delayMs, false);
+        this.zb3KeyManagement.updateReopenNetworkFlag('mixed', deviceEui);
         break;
       case 'permitjoinZB3OpenNetworkOnly':
         var delayMs = messageParsed.delayMs;
 
         ServerActions.GatewayInterface.zigbee3PermitJoinMsOpenNetworkOnly();
+        this.zb3KeyManagement.updateReopenNetworkFlag('centralized', '');
         break;
       case 'permitjoinZB3InstallCodeOnly':
         var deviceEui = messageParsed.deviceEui;
@@ -296,12 +428,14 @@ var DeviceController = {
         var delayMs = messageParsed.delayMs;
 
         this.zb3KeyManagement.startZB3Join(deviceEui, installCode, delayMs, true);
+        this.zb3KeyManagement.updateReopenNetworkFlag('installCodeOnly', deviceEui);
         break;
       case 'permitjoinoff':
         ServerActions.GatewayInterface.zigbeePermitJoinOff();
         break;
       case 'permitjoinoffZB3':
         ServerActions.GatewayInterface.zigbee3PermitJoinOff();
+        this.zb3KeyManagement.updateReopenNetworkFlag('close', '');
         break;
       case 'addrelay':
         var inDeviceInfo = messageParsed.inDeviceInfo;
@@ -356,36 +490,27 @@ var DeviceController = {
         }
         this.sendCloudStateToClients();
         break;
-      case 'reformnetwork':
-        var chan = messageParsed.radioChannel;
-        var txpower = messageParsed.radioTxPower;
-        var pan = messageParsed.networkPanId;
-        DeviceDBManagement.clearDevicesList();
-        this.groups = [];
-        ServerActions.GatewayInterface.zigbeeReformNetwork(chan, txpower, pan);
-        this.syncCloudNetworkSecurityLevelWithLocalCopy('HA');
-        break;
       case 'simpleReformZB3Network':
         ServerActions.GatewayInterface.zigbee3SimpleReformNetwork();
         this.syncCloudNetworkSecurityLevelWithLocalCopy('Z3');
+        DeviceDBManagement.clearDevicesList();
         this.simpleRefromZB3NetworkTriggered = true;
         break;
       case 'reformZB3network':
         var chan = messageParsed.radioChannel;
         var txpower = messageParsed.radioTxPower;
         var pan = messageParsed.networkPanId;
-
+        DeviceDBManagement.clearDevicesList();
         ServerActions.GatewayInterface.zigbee3ReformNetwork(chan, txpower, pan);
         this.syncCloudNetworkSecurityLevelWithLocalCopy('Z3');
         break;
       case 'removedevice':
         var nodeId = messageParsed.nodeId;
+        var deviceEui = messageParsed.deviceEui;
+        var endpoint = messageParsed.endpoint;
 
+        this.rulesEngine.deleteRulesByDeviceInfo(deviceEui, endpoint);
         ServerActions.GatewayInterface.zigbeeRemoveDevice(nodeId);
-        var deviceEui = DeviceDBManagement.getEuiByNodeId(nodeId);
-        if (deviceEui) {
-          this.zb3KeyManagement.deleteKey(deviceEui);
-        }
         break;
       case 'lighttoggle':
         var deviceEndpoint = messageParsed.deviceEndpoint;
@@ -401,6 +526,16 @@ var DeviceController = {
         var deviceEndpoint = messageParsed.deviceEndpoint;
 
         ServerActions.GatewayInterface.zigbeeLightOn(deviceEndpoint);
+        break;
+      case 'enterIdentify':
+        var deviceEndpoint = messageParsed.deviceEndpoint;
+
+        ServerActions.GatewayInterface.zigbeeEnterIdentify(deviceEndpoint);
+        break;
+      case 'exitIdentify':
+        var deviceEndpoint = messageParsed.deviceEndpoint;
+
+        ServerActions.GatewayInterface.zigbeeExitIdentify(deviceEndpoint);
         break;
       case 'setlightlevel':
         var deviceEndpoint = messageParsed.deviceEndpoint;
@@ -616,113 +751,103 @@ var DeviceController = {
     }
   },
 
-  /* This event is fired when a device sends a command
-  mqtt message format:
-  {
-    clusterId: "clusterIdString",
-    commandId: "hexBuffer",
-    commandData: "hexBuffer",
-    nodeId: "nodeIDString",
-    nodeEui: "nodeEuiString",
-  }
+  /*
+    Helper methods
   */
-  onCommand: function(messageParsed) {
-    var globalItem = DeviceDBManagement.devices[DeviceDBManagement.getHash(messageParsed.deviceEndpoint)]
 
-    // If global item does not exist
-    if (!globalItem) return;
-
-    // Determine action
-    if (messageParsed.clusterId == Constants.IAS_ZONE_CLUSTER) {
-      if (messageParsed.commandId == Constants.ZONE_STATUS_CHANGE_NOTIFICATION_COMMAND_ID) {
-        // Get Character 0x0<o>00 0000 0000 from hex string
-        var zoneStatusNibble = messageParsed.commandData[3];
-        globalItem.tamperState = zoneStatusNibble & 4;
-        globalItem.contactState = zoneStatusNibble & 1;
-        Logger.server.info('DeviceController: ZoneStatusChangeCommandSuccess: contactState: ' + globalItem.contactState
-                            + ' tamperState: ' + globalItem.tamperState);
-        ServerActions.SocketInterface.publishDeviceUpdateToClients(globalItem);
-      }
-    }
+  setLogStreaming: function(value) {
+    this.serverSettings.logStreaming = value;
+    Logger.logStreaming = value;
   },
 
-  /* This event is fired when a device sends a new attribute
-  mqtt message format:
-  {
-    clusterId: "clusterIdString",
-    attributeId: "attributeIdString",
-    attributeBuffer: "hexBuffer",
-    attributeDataType: <dataTypeInt>,
-    nodeId: "nodeIDString",
-    nodeEui: "nodeEuiString",
-    returnStatus: <0 or 1>,
-  }
-  */
-
-  // This is called when a node's unique camel case attribute 'tag' is read
-  onAttributeUpdate: function(messageParsed) {
-    var globalItem = DeviceDBManagement.devices[DeviceDBManagement.getHash(messageParsed.deviceEndpoint)]
-
-    // Read property
-    var property = friendlyParameterName(messageParsed.clusterId, messageParsed.attributeId);
-
-    // Can't find property
-    if (property ===  undefined) {
-      Logger.server.info('DeviceController: AttributeUpdateFailed: Cant find property');
-      return;
-    }
-
-    // Parse buffer and return value string
-    try {
-      var value = zclParseBufferRaw(messageParsed.attributeDataType, messageParsed.attributeBuffer);
-    } catch (e) {
-      Logger.server.info('DeviceController: AttributeUpdateFailed: Exception parsing value: ' + e.toString());
-      return;
-    }
-
-    var convertedValue = formatAndAssignValue(globalItem, property, value, messageParsed.status);
-
-    Logger.server.info('DeviceController: AttributeUpdateSuccess: Property: ' + property +
-                        ' Value:' + value + ' Converted: ' + convertedValue);
-
-    ServerActions.SocketInterface.publishDeviceUpdateToClients(globalItem);
+  setOtaInProgress: function(value) {
+    this.serverSettings.otaInProgress = value;
   },
 
-  /*
-  This is called when an Over-The-Air upgrade event occurs on a node
-    otaFinished
-    otaBlockSent
-    otaStarted
-    otaFailed
+  getServerSettings: function(callback) {
+    // Refresh IP Address
+    this.serverSettings.ip = ip.address();
+    callback(this.serverSettings);
+  },
 
-  {
-    messageType: "<otaTypeString>",
-    nodeId: "nodeIDString",
-    nodeEui: "nodeEuiString",
-    returnStatus: <0 or 1>,         //optional
-    blocksSent: <numberOfBlocks>,   //optional
-    blockSize: <sizeOfBlocksInBytes>, //optional
-    manufacturerId: "%04String",  //optional
-    imageTypeId: "%04String", //optional
-    firmwareVersion: "%08String" //optional
-  }
-  */
+  sendServerSettings: function() {
+    // Refresh IP Address
+    this.serverSettings.ip = ip.address();
+    ServerActions.SocketInterface.sendServerSettings(this.serverSettings);
+  },
 
-  /*
-  {"messageType":"otaBlockSent",
-  "eui64":"0x000B57FFFE0977E1",
-  "bytesSent":177975,
-  "manufacturerId":"0x1002",
-  "imageTypeId":"0xA002",
-  "firmwareVersion":"0x00000002"}
-  */
+  sendHeartbeat: function() {
+    ServerActions.SocketInterface.publishHeartbeatToClients(this.gatewayNetworkState);
+  },
 
-  onOtaEvent: function(messageParsed) {
-    _.each(DeviceDBManagement.devices, function(value, key, list) {
-      if (key.split('-')[0] == messageParsed.eui64) {
-        this.updateDeviceFromOTA(value, messageParsed);
-      }
-    }.bind(this));
+  sendNetworkSecurityLevel: function(securityLevel) {
+    ServerActions.SocketInterface.publishNetworkSecurityLevelToClients(securityLevel)
+  },
+
+  sendNetworkSecurityLevel: function(message) {
+    ServerActions.SocketInterface.publishNetworkSecurityLevelToClients(message);
+  },
+
+  syncCloudNetworkSecurityLevelWithLocalCopy: function(securityLevelFromCloud) {
+    this.gatewayList[this.gatewayEui].networkSecurityLevel = securityLevelFromCloud;
+    fs.writeFileSync(gatewayStorePath, JSON.stringify(this.gatewayList));
+  },
+
+  setGatewayCurrentGatewayEui: function(gatewayEui) {
+    this.gatewayEui = gatewayEui;
+    ServerActions.GatewayInterface.currentGatewayEui = gatewayEui;
+  },
+
+  setGatewayNetworkState: function(state) {
+    this.gatewayNetworkState = state;
+  },
+
+  sendCloudStateToClients: function() {
+    // Cloud device state
+    var cloudState = {
+      devices: {},
+      groups: [],
+      cloudRules: [],
+      gatewayEui: ''
+    };
+
+    // Refresh Cloud State
+    cloudState.devices = _.values(DeviceDBManagement.devices);
+    cloudState.groups = this.groups;
+    cloudState.gatewayEui = this.gatewayEui;
+    cloudState.cloudRules = this.rulesEngine.getRulesArray();
+
+    this.sendServerSettings();
+    ServerActions.SocketInterface.publishDeviceStateToClients(cloudState);
+    ServerActions.SocketInterface.publishRulesStateSocketMessage(this.relayList);
+  },
+
+  requestGatewayState: function() {
+    ServerActions.GatewayInterface.requestState();
+  },
+
+  startTrafficTest: function(deviceEndpoint, period, iterations, nodeId, deviceType) {
+    Logger.server.log('info', 'Starting Customer Test... ');
+
+    if (this.serverSettings.customerTesting) {
+      Logger.server.log('info', 'Already Testing. Restarting. ');
+    }
+
+    // Start a test
+    this.currentTest = new CustomerTest(this.serverSettings.testNumber,
+                Logger.testing,
+                period,
+                iterations,
+                nodeId,
+                deviceType);
+
+    this.serverSettings.customerTesting = true;
+    this.setLogStreaming(false);
+    this.serverSettings.testNumber++;
+
+    ServerActions.GatewayInterface.gatewaySetAttribute('trafficReporting', true);
+    ServerActions.GatewayInterface.zigbeeStartTrafficTest(deviceEndpoint, period, iterations)
+    ServerActions.GatewayInterface.requestState();
   },
 
   recordOtaUpdatingNodeEui: function(eui64) {
@@ -773,6 +898,7 @@ var DeviceController = {
         this.serverSettings.otaInProgress = false;
         _.extend(device, {otaUpdating: false, otaTotalBytesSent: 0});
         ServerActions.SocketInterface.publishDeviceUpdateToClients(device);
+        ota.clearOta();
       }.bind(this), Constants.OTA_BLOCKSENT_TIMEOUT);
 
     } else if (messageParsed.messageType === 'otaFinished') {
@@ -796,6 +922,7 @@ var DeviceController = {
     }
 
     ServerActions.SocketInterface.publishDeviceUpdateToClients(device);
+    ServerActions.SocketInterface.publishOtaEventsToClients(messageParsed);
   },
 
   sendOTAContents: function(messageParsed) {
@@ -813,143 +940,20 @@ var DeviceController = {
     }.bind(this));
   },
 
-  onTrafficTestResults: function(messageParsed) {
-    // On test finish wait 3 seconds and report results.
-    setTimeout(function() {
-      this.serverSettings.customerTesting = false;
-
-      if (this.currentTest !== null) {
-        this.currentTest.setLegacy(messageParsed);
-        this.currentTest.processBuildDefault();
-        ServerActions.GatewayInterface.gatewaySetAttribute('trafficReporting', false);
-        ServerActions.GatewayInterface.requestState();
-      } else {
-        Logger.server.log('error', 'Current test is null');
-      }
-      Logger.server.log('info', 'Testing Results: ' + JSON.stringify(messageParsed));
-      ServerActions.SocketInterface.sendTrafficTestResults(messageParsed);
-    }.bind(this), Constants.TEST_MESSAGE_IN_FLIGHT_TIMEOUT);
-  },
-
-  onTestEvent: function(messageParsed) {
-    if (this.currentTest !== null) {
-      if (Config.CLOUD_ENABLED) {
-        Logger.server.log('info', 'Cloud enabled, Test functions disabled');
-        return;
-      }
-      this.currentTest.handleTestMessage(messageParsed);
-    } else {
-      Logger.server.log('error', 'Current test is null');
-    }
-  },
-
   publishGatewayLogStreamSocketMessage: function(message) {
     ServerActions.SocketInterface.publishGatewayStreamSocketMessage(message.toString());
   },
 
-  onRelayList: function(messageParsed) {
-    this.relayList = messageParsed;
-    this.sendCloudStateToClients();
-  },
-
   getGatewayNetworkState: function() {
     return this.gatewayNetworkState;
-  },
-
-  onHeartbeat: function(messageParsed, gatewayEui) {
-    clearTimeout(this.missingHeartbeat);
-    var randomPanValue = Math.floor(Math.random() * (65535)) + 1;
-
-    var currentGateway = {
-      gatewayEui: this.gatewayEui,
-      pan: Utilities.formatNumberToHexString(randomPanValue, 4).slice(-4),
-      chan: '14',
-      pow: '-2',
-      netstat: messageParsed.networkUp
-    };
-
-    // If gateway does not exist, reform the network
-    if (!this.gatewayList[this.gatewayEui]) {
-      Logger.server.log('info', 'in Heartbeat: Gateway not found in Store.');
-
-      // Add the current gateway to the dictionary, write to store, and reform
-      this.gatewayList[this.gatewayEui] = currentGateway;
-      fs.writeFileSync(gatewayStorePath, JSON.stringify(this.gatewayList));
-      // zigbee3ReformNetwork takes channel string, pow string, pan string (without 0x)
-      ServerActions.GatewayInterface.zigbee3ReformNetwork(currentGateway.chan,
-                                                          currentGateway.pow,
-                                                          currentGateway.pan);
-      // Set the default networkSecurityLevel as 'Z3'.
-      currentGateway.networkSecurityLevel = 'Z3';
-
-      Logger.server.log('info', 'in Heartbeat: Created Random PAN, Saved, and Reformed Network.');
-    } else {
-      // Found gateway information, check if up
-      if (messageParsed.networkUp) {
-        // Update gateway info to heartbeat information
-        currentGateway.networkPanId = messageParsed.networkPanId;
-        currentGateway.radioTxPower = messageParsed.radioTxPower;
-        currentGateway.radioChannel = messageParsed.radioChannel;
-        if (this.gatewayList[this.gatewayEui].networkSecurityLevel != undefined) {
-          currentGateway.networkSecurityLevel = this.gatewayList[this.gatewayEui].networkSecurityLevel;
-        } else {
-          currentGateway.networkSecurityLevel = 'HA';
-        }
-        this.gatewayList[this.gatewayEui] = currentGateway;
-
-        fs.writeFileSync(gatewayStorePath, JSON.stringify(this.gatewayList));
-        clearTimeout(this.validateNetworkReformCountDown);
-      } else {
-        // Gateway is down
-        Logger.server.log('info', 'in Heartbeat: Gateway found in store and network down.');
-      }
-    }
-
-    this.setGatewayCurrentGatewayEui(gatewayEui);
-    this.setGatewayNetworkState(messageParsed);
-    this.sendHeartbeat();
-    if (currentGateway.networkSecurityLevel != undefined) {
-        this.sendNetworkSecurityLevel(currentGateway.networkSecurityLevel);
-    }
-
-    this.missingHeartbeat = setTimeout(function() {
-      var missedHeartbeatMessage = {
-        'networkUp': null,
-      };
-
-      this.setGatewayNetworkState(missedHeartbeatMessage);
-      this.sendHeartbeat();
-
-      Logger.server.log('info', 'SocketIO Emit: Gateway Down. '
-        + 'Topic: heartbeat \nPayload: '
-        + JSON.stringify(this.gatewayNetworkState));
-
-      // Wait for this heartbeat at 2x the timeout value
-    }.bind(this), Constants.GATEWAY_HEARTBEAT_FREQUENCY_MS * 2);
-
-    if (this.simpleRefromZB3NetworkTriggered) {
-      // Make sure we set the countdown once.
-      this.simpleRefromZB3NetworkTriggered = false;
-      this.validateNetworkReformCountDown = setTimeout(function() {
-        // Add the current gateway to the dictionary, write to store, and reform
-        this.gatewayList[this.gatewayEui] = currentGateway;
-        fs.writeFileSync(gatewayStorePath, JSON.stringify(this.gatewayList));
-        // zigbee3ReformNetwork takes channel string, pow string, pan string (without 0x)
-        ServerActions.GatewayInterface.zigbee3ReformNetwork(currentGateway.chan,
-                                                            currentGateway.pow,
-                                                            currentGateway.pan);
-        // Set the default networkSecurityLevel as 'Z3'.
-        currentGateway.networkSecurityLevel = 'Z3';
-      }.bind(this), Constants.GATEWAY_HEARTBEAT_FREQUENCY_MS * 2);
-    }
   }
 };
 
 function friendlyParameterName(cluster, attribute) {
   var clusterInt = parseInt(cluster, 16);
-  var attribInt = parseInt(attribute, 16);
+  var attributeInt = parseInt(attribute, 16);
 
-  return ZCLAttributeNames[clusterInt][attribInt];
+  return ZCLAttributeNames[clusterInt][attributeInt];
 }
 
 function zclParseBufferRaw(datatype, buffer) {
@@ -1119,6 +1123,10 @@ function formatAndAssignValue(globalItem, friendlyName, value, status) {
   } else if (friendlyName === 'activePower') {
     value = value / 10;
 
+  } else if (friendlyName === 'rssiValue') {
+    // No conversion
+  } else if (friendlyName === 'lqiValue') {
+    // No conversion
   } else {
     // No conversion
   }

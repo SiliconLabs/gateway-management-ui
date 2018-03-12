@@ -1,10 +1,10 @@
 'use strict';
 // Copyright 2015 Silicon Laboratories, Inc.
-var ServerActions = require('./actions/ServerActions.js'),
-    Constants     = require('./Constants.js'),
+var ServerActions = require('../../actions/ServerActions.js'),
+    Constants     = require('../../Constants.js'),
+    Logger        = require('../../Logger.js'),
     fs            = require('fs-extra'),
     path          = require('path'),
-    Logger        = require('./Logger.js'),
     _             = require('underscore');
 
 var rulesStorePath = path.join(__dirname, Constants.rulesStore);
@@ -125,10 +125,38 @@ class RulesEngine {
 
     _.each(this.rules[ruleID], function(rule) {
       if (_.isEqual(rule, { inDeviceEndpoint, outDeviceEndpoint, ruleType })){
-        delete this.rules[ruleID];
+        var itemIndex = _.indexOf(this.rules[ruleID], rule);
+        this.rules[ruleID].splice(itemIndex, 1);
       }
     }.bind(this));
     fs.writeFileSync(rulesStorePath, JSON.stringify(this.rules));
+  }
+
+  deleteRulesByDeviceInfo(deviceEui, endpoint) {
+    var inputDeviceMatches = false;
+    var keys = _.keys(this.rules);
+
+    for (var i in keys) {
+      if (keys[i].indexOf(deviceEui) !== -1) {
+        delete this.rules[keys[i]];
+        fs.writeFileSync(rulesStorePath, JSON.stringify(this.rules));
+        inputDeviceMatches = true;
+      }
+    }
+
+    if (!inputDeviceMatches) {
+      var removeItemIndex = [];
+      _.each(this.rules, function(rulesList) {
+        for (var i in rulesList) {
+          if (rulesList[i].outDeviceEndpoint.eui64 === deviceEui &&
+              rulesList[i].outDeviceEndpoint.endpoint === endpoint) {
+            rulesList.splice(i, 1);
+            break;
+          }
+        }
+      }.bind(this));
+      fs.writeFileSync(rulesStorePath, JSON.stringify(this.rules));
+    }
   }
 
   getRulesArray() {

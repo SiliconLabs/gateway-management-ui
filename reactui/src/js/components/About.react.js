@@ -65,7 +65,7 @@ class About extends React.Component {
         </p>
 
         <p>
-          <i>Copyright &copy; 2017 Silicon Laboratories, Inc. All rights reserved.</i>
+          <i>Copyright &copy; 2018 Silicon Laboratories, Inc. All rights reserved.</i>
         </p>
 
         <div className="ui divider"></div>

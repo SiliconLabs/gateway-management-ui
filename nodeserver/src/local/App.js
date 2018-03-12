@@ -8,7 +8,7 @@ var fs               = require('fs-extra')
   , StaticServer     = require('../common/routes/StaticServer.js')
   , DeviceController = require('../common/controller/DeviceController.js')
   , ServerActions    = require('../common/actions/ServerActions.js')
-  , ota              = require('../common/OverTheAirUpdate.js')
+  , ota              = require('../common/controller/sub-modules/OverTheAirUpdate.js')
   , Logger           = require('../common/Logger.js')
   , _                = require('underscore')
   , Constants        = require('../common/Constants.js')
@@ -17,7 +17,7 @@ var fs               = require('fs-extra')
   , TimeQueue        = require('timequeue')
   , Config           = require('../common/Config.js');
 
-Logger.server.log('info', 'Silicon Labs HA MQTT/Websocket server starting... ');
+Logger.server.log('info', 'Silicon Labs ZB3.0 MQTT/Websocket server starting... ');
 
 /* Stub for Gateway Process */
 var gatewayProcess;
@@ -33,9 +33,10 @@ ServerActions.GatewayInterface.commandListQueue = new TimeQueue(ServerActions.Ga
 ServerActions.SocketInterface.ioserver = SocketInterface;
 
 var binPath = path.join(__dirname, '../../../../bin');
+var pyScriptPath = path.join(__dirname, '../../../../tools/ncp-updater');
 
 // Watches OTA Directory for changes
-var otaArchivePath = path.join(__dirname, Constants.otaArchivePath);
+var otaArchivePath = path.join(__dirname, Constants.otaArchiveCreationPath);
 
 // Create directory ota_staging if does not exist
 if (!fs.existsSync(otaArchivePath)){
@@ -50,7 +51,7 @@ chokidar.watch(otaArchivePath, {ignored: /[\/\\]\./}).on('all', function() {
   DeviceController.sendOTAContents(ota.files);
 });
 
-findGatewayUpdateAndStart()
+findGatewayUpdateAndStart();
 
 /* Main function to start gateway host application */
 function findGatewayUpdateAndStart() {
@@ -104,7 +105,7 @@ function startGateway(ZigBeeNCP) {
       });
       isCliTerminalEnabled = true;
     }
-    
+
     Logger.server.log('info', 'Started Gateway Host Process');
 
     gatewayProcess.stdout.on('data', function(data) {
@@ -136,7 +137,7 @@ function killGateway() {
 
 /* This function returns all ZigBee NCPs */
 function getAllConnectedZigBeeNCP(callback) {
-  ncpSubProcess = child_process.exec('python /opt/siliconlabs/zigbeegateway/tools/ncp-updater/ncp.py scan', {timeout: 4000}, function(error, stdout, stderr) {
+  ncpSubProcess = child_process.exec('python ' + pyScriptPath + '/ncp.py scan', {timeout: 4000}, function(error, stdout, stderr) {
     ncpSubProcess = null;
     if (error) {
       Logger.server.log('error', 'exec error: ncp.py scan: ' + error);
@@ -173,7 +174,7 @@ function getAllConnectedZigBeeNCP(callback) {
 
 /* This function updates a ZigBee NCP */
 function updateConnectedZigBeeNCP(ZigBeeNCP, imageToUpdateTo, callback) {
-  var flashCommand = 'python /opt/siliconlabs/zigbeegateway/tools/ncp-updater/ncp.py flash -p ' + ZigBeeNCP.port + ' -f ' + imageToUpdateTo;
+  var flashCommand = 'python ' + pyScriptPath + '/ncp.py flash -p ' + ZigBeeNCP.port + ' -f ' + imageToUpdateTo;
   Logger.server.log('info', 'p.py flash: starting update: ' + ZigBeeNCP.port + ' ' + imageToUpdateTo);
   ncpSubProcess = child_process.exec(flashCommand, function(error, stdout, stderr) {
     ncpSubProcess = null;

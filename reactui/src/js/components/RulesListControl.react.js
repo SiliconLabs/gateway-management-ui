@@ -39,8 +39,9 @@ class RulesListControl extends React.Component {
       if (item === undefined) {
         return;
       } else {
+        var itemKey = item.from.simplename + ':' + item.to.simplename;
         return (
-          <div className="item">
+          <div className="item" key={itemKey}>
             <div className="content" style={{ paddingRight: '2.5em' }}>
               <a className="header">
                 {item.from.simplename} : {item.to.simplename}

@@ -16,13 +16,20 @@ var Constants = {
   DEVICE_TYPE_SMART_PLUG: 0x0051,
   DEVICE_TYPE_OCCUPANCY_SENSOR: 0x0107,
 
+  // Device Type Table
+  NON_SLEEPY_DEVICE_TYPE_TABLE: {},
+
+  // Decisive Cluster # For In or Out
   IN_OUT_DECISION_CLUSTER: 0x0400,
   // ZigBee On/off Cluster
   ON_OFF_CLUSTER: 0x0006,
   // ZigBee Color-Control Cluster
   COLOR_CONTROL_CLUSTER: 0x0300,
-  // ZigBee Level-Control CLuster
+  // ZigBee Level-Control Cluster
   LEVEL_CONTROL_CLUSTER: 0x0008,
+  // ZigBee Identify Cluster
+  IDENTIFY_CLUSTER: 0x0003,
+  IDENTIFY_TIME_ATTRIBUTE: 0x0000,
 
   // ZigBee Bootloader Cluster
   BOOTLOADER_CLUSTER: 0x0019,
@@ -94,9 +101,17 @@ var Constants = {
   ACTIVE_POWER_OVERLOAD_ATTRIBUTE: 0x0803,
   ACTIVE_POWER_OVERLOAD_TYPE: 0x29,
 
+  // Diagnostics Cluster
+  DIAGNOSTICS_CLUSTER: 0x0B05,
+  LQI_VAL_ATTRIBUTE: 0x011C,
+  LQI_VAL_TYPE: 0x20,
+  RSSI_VAL_ATTRIBUTE: 0x011D,
+  RSSI_VAL_TYPE: 0x28,
+
   // Endpoints
   SELF_ENDPOINT: 0,
   SMART_ENERGY_ENDPOINT: 220,
+  GREEN_POWER_ENDPOINT: 242,
 
   // Commands
   ZONE_STATUS_CHANGE_NOTIFICATION_COMMAND_ID: 0x00,
@@ -119,9 +134,11 @@ var Constants = {
   BIND_POST_DELAY: 200,
   REPORTING_POST_DELAY: 200,
   GATEWAY_PROCESS_WATCHDOG_TIMER: 5000,
-  OTA_BLOCKSENT_TIMEOUT: 30000,
+  OTA_BLOCKSENT_TIMEOUT: 60000, // 60s
 
-  ZIGBEE_NCP_REQUIRED_VERSION: '5.9.0',
+  ZIGBEE_NCP_REQUIRED_VERSION: '5.10.0',
+  RSSI_LQI_REQ_DEVICE_LIMIT: 5,
+  WILDCARD_DEVICE_EUI: 'FFFFFFFFFFFFFFFF',
 
   MQTT_PRIVKEY_FILELOCATION: '/certs/client.key',
   MQTT_CERT_FILELOCATION: '/certs/client.crt',
@@ -132,7 +149,7 @@ var Constants = {
   TERMINAL_COMMAND: 'mate-terminal',
   POSTDELAY_KEYWORD: 'postDelayMs',
   POSTDELAYMS_DEFAULT: 100,
-  LINKKEY_START_INDEX: 110,
+  LINKKEY_START_INDEX: 150,
   CENTRALIZED_SECURITY: 1,
 
   // File Paths
@@ -141,16 +158,25 @@ var Constants = {
   gatewayLogFilename: 'gateway.log',
   testLogFilename: 'traffictest.log',
   gatewayStore: 'stores/GatewayStores.txt',
-  rulesStore: 'controller/stores/CloudRules.txt',
-  zb3KeysStore: 'controller/stores/ZB3Keys.txt',
+  rulesStore: '../stores/CloudRules.txt',
+  zb3KeysStore: '../stores/ZB3Keys.txt',
   keyDerivationExec: 'hashing-cli',
 
   // This path reflects the ZigBee VM's filestructure
   znetOtaDirectory: '../../bin/ota-files',
-  otaArchivePath: '../../../../ota_staging',
-  commandsScriptsPath: '../../../../../tools',
+  otaArchiveSearchingPath: '../../../../../../ota_staging',
+  otaArchiveCreationPath: '../../../../ota_staging',
+  commandsScriptsPath: '../../../../../../tools',
   staticPath: '../../../../reactui/dist',
-  keyDerivationPath: '../../../../tools/key-derivation/'
+  keyDerivationPath: '../../../../../../tools/key-derivation/'
 };
+
+Constants.NON_SLEEPY_DEVICE_TYPE_TABLE[Constants.DEVICE_ID_ON_OFF_LIGHT] = {};
+Constants.NON_SLEEPY_DEVICE_TYPE_TABLE[Constants.DEVICE_ID_DIMMABLE_LIGHT] = {};
+Constants.NON_SLEEPY_DEVICE_TYPE_TABLE[Constants.DEVICE_ID_COLOR_DIMMABLE_LIGHT] = {};
+Constants.NON_SLEEPY_DEVICE_TYPE_TABLE[Constants.DEVICE_ID_HA_ON_OFF_LIGHT] = {};
+Constants.NON_SLEEPY_DEVICE_TYPE_TABLE[Constants.DEVICE_ID_EXTENDED_COLOR_LIGHT] = {};
+Constants.NON_SLEEPY_DEVICE_TYPE_TABLE[Constants.DEVICE_ID_COLOR_TEMPERATURE_LIGHT] = {};
+Constants.NON_SLEEPY_DEVICE_TYPE_TABLE[Constants.DEVICE_TYPE_SMART_PLUG] = {};
 
 module.exports = Constants;
