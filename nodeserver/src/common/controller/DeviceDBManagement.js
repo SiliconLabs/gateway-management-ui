@@ -74,7 +74,7 @@ var DeviceDBManagement = {
     _.each(this.devices, function(device) {
       if(device.zclRequested === undefined
           || !device.zclRequested) {
-        this.requestNodeDefaultAttributes(joiningDevice);
+        this.requestNodeDefaultAttributes(device);
         device.zclRequested = true;
       }
     }.bind(this));
