@@ -1,6 +1,8 @@
 # gateway-management-ui
 
-**Note: The following UI components and reference designs are deprecated.** They pertain to obsolete reference designs. Customers who do not have prior experience with these reference designs are advised not to attempt to use these extensions.
+**Note: The following UI components and reference designs are deprecated and contain security vulnerabilities.** They pertain to obsolete reference designs. Customers who do not have prior experience with these reference designs are advised not to attempt to use these extensions.
+
+The included Underscore library has [a known security vulnerability](https://nvd.nist.gov/vuln/detail/CVE-2021-23358). Customers who wish to use the following components should update the relevant files.
 
 This project offers the Nodejs server and Reactjs UI components for these reference designs:
 
