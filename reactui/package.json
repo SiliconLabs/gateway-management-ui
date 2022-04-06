@@ -36,7 +36,11 @@
   "scripts": {
     "start": "gulp",
     "build": "gulp build",
-    "server": "gulp server"
+    "server": "gulp server",
+    "preinstall": "npx npm-force-resolutions"
+  },
+  "resolutions": {
+    "graceful-fs": "^4.2.4"
   },
   "author": "Silicon Labs",
   "browserify": {
